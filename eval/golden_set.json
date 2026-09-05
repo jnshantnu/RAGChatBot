@@ -1,0 +1,83 @@
+[
+  {
+    "query": "How do I authenticate to the Partner WebServices API?",
+    "expected_doc_ids": ["nxm-pws-api-authentication-guide", "buysell-pws-api-authentication-guide"],
+    "answerable": true
+  },
+  {
+    "query": "What is the maximum number of line items allowed in a CreateQuote request?",
+    "expected_doc_ids": ["nxm-pws-create-quote-v3-service-reference-manual"],
+    "answerable": true
+  },
+  {
+    "query": "What does the GetMyPrice service do?",
+    "expected_doc_ids": ["buysell-pws-place-order-api-implementation-guide", "buysell-pws-get-myprice-service-reference-manual"],
+    "answerable": true
+  },
+  {
+    "query": "What does the GetInvoice service provide?",
+    "expected_doc_ids": ["buysell-pws-get-invoice-service-reference-manual"],
+    "answerable": true
+  },
+  {
+    "query": "What does GetLicense retrieve?",
+    "expected_doc_ids": ["buysell-pws-place-order-api-implementation-guide"],
+    "answerable": true
+  },
+  {
+    "query": "What does the GetOpportunity service retrieve?",
+    "expected_doc_ids": ["buysell-pws-place-order-api-implementation-guide", "nxm-pws-get-opportunity-v2-service-reference-manual"],
+    "answerable": true
+  },
+  {
+    "query": "How do I finalize a quote?",
+    "expected_doc_ids": ["nxm-pws-finalize-quote-service-reference-manual"],
+    "answerable": true
+  },
+  {
+    "query": "How do I check the status of a quote?",
+    "expected_doc_ids": ["nxm-pws-get-quote-status-service-reference-manual"],
+    "answerable": true
+  },
+  {
+    "query": "How do I get the status of a subscription?",
+    "expected_doc_ids": ["nxm-pws-get-subscriptions-status-service-reference-manual"],
+    "answerable": true
+  },
+  {
+    "query": "How do I place a Buy-Sell order?",
+    "expected_doc_ids": ["buysell-pws-placeorder-v2-service-reference-manual", "buysell-pws-place-order-api-implementation-guide"],
+    "answerable": true
+  },
+  {
+    "query": "How do I update an existing subscription via the BuySell API?",
+    "expected_doc_ids": ["buysell-pws-update-subscriptions-service-reference-manual"],
+    "answerable": true
+  },
+  {
+    "query": "which apis are available for buy sell model",
+    "expected_doc_ids": ["buysell-pws-place-order-api-implementation-guide"],
+    "answerable": true,
+    "note": "regression case: the word 'BuySell' never appears in this PDF's own text, only in its filename -- caught a real bug where chunks lost their business-model identity at ingest time. See chunk_pdf's doc_title prefix in ingest/chunker.py."
+  },
+  {
+    "query": "Does the API support GraphQL?",
+    "expected_doc_ids": [],
+    "answerable": false
+  },
+  {
+    "query": "Can partners pay Autodesk invoices using cryptocurrency?",
+    "expected_doc_ids": [],
+    "answerable": false
+  },
+  {
+    "query": "Does the platform support Slack notifications for order status changes?",
+    "expected_doc_ids": [],
+    "answerable": false
+  },
+  {
+    "query": "What is the customer support phone number for urgent order escalations?",
+    "expected_doc_ids": [],
+    "answerable": false
+  }
+]

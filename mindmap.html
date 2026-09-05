@@ -1,0 +1,534 @@
+<title>RAG Pipeline Schematic</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;0,600;0,700;1,500&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --paper: #eef2f6;
+    --surface: #ffffff;
+    --ink: #10233a;
+    --ink-soft: #48607a;
+    --line: #c1cedb;
+    --line-soft: #dbe4ec;
+    --accent: #0f7a8c;
+    --accent-soft: #d7edf0;
+    --restrict: #b23b2e;
+    --restrict-soft: #f6e0dc;
+    --warn: #a9720f;
+    --warn-soft: #f4e6cc;
+    --font-display: "Fraunces", Georgia, "Times New Roman", serif;
+    --font-body: "IBM Plex Sans", -apple-system, "Segoe UI", sans-serif;
+    --font-mono: "IBM Plex Mono", "SF Mono", Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #0c1620;
+      --surface: #121f2b;
+      --ink: #e4ecf3;
+      --ink-soft: #93a8bc;
+      --line: #2b4054;
+      --line-soft: #1c2c3a;
+      --accent: #4fd0e0;
+      --accent-soft: #133139;
+      --restrict: #ff9382;
+      --restrict-soft: #3a1f1d;
+      --warn: #ffcf72;
+      --warn-soft: #3a2d15;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #0c1620;
+    --surface: #121f2b;
+    --ink: #e4ecf3;
+    --ink-soft: #93a8bc;
+    --line: #2b4054;
+    --line-soft: #1c2c3a;
+    --accent: #4fd0e0;
+    --accent-soft: #133139;
+    --restrict: #ff9382;
+    --restrict-soft: #3a1f1d;
+    --warn: #ffcf72;
+    --warn-soft: #3a2d15;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--paper);
+    background-image:
+      linear-gradient(var(--line-soft) 1px, transparent 1px),
+      linear-gradient(90deg, var(--line-soft) 1px, transparent 1px);
+    background-size: 28px 28px;
+    color: var(--ink);
+    font-family: var(--font-body);
+    margin: 0;
+    padding: 2.5rem 1.25rem 5rem;
+    line-height: 1.55;
+  }
+  .sheet { max-width: 1080px; margin: 0 auto; }
+
+  h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; margin: 0; }
+  h2 { font-size: 1.5rem; font-weight: 600; }
+  h3 { font-size: 1.05rem; font-weight: 600; }
+  p { max-width: 68ch; color: var(--ink-soft); }
+  code { font-family: var(--font-mono); font-size: 0.85em; }
+
+  /* ---------- title block ---------- */
+  .titleblock {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 1.75rem 2rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 2rem;
+    flex-wrap: wrap;
+  }
+  .titleblock .kicker {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 0.5rem;
+  }
+  .titleblock h1 { font-size: 2rem; font-weight: 700; font-style: italic; }
+  .titleblock .sub { margin: 0.4rem 0 0; font-size: 0.95rem; }
+  .meta-grid {
+    display: grid;
+    grid-template-columns: auto auto;
+    gap: 0.15rem 0.9rem;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--ink-soft);
+    white-space: nowrap;
+  }
+  .meta-grid dt { color: var(--ink); font-weight: 600; }
+  .meta-grid dd { margin: 0; }
+
+  /* ---------- legend ---------- */
+  .legend {
+    display: flex;
+    gap: 1.4rem;
+    flex-wrap: wrap;
+    margin: 1.1rem 0 0;
+    padding: 0.7rem 1rem;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+  }
+  .legend .item { display: flex; align-items: center; gap: 0.45rem; }
+  .stamp { width: 0.7rem; height: 0.7rem; border-radius: 50%; display: inline-block; flex: none; }
+  .stamp.built { background: var(--accent); }
+  .stamp.simplified { background: var(--warn); }
+  .stamp.todo { background: transparent; border: 2px solid var(--restrict); }
+
+  /* ---------- sections ---------- */
+  section { margin-top: 3.2rem; }
+  .section-head { display: flex; align-items: baseline; gap: 0.7rem; margin-bottom: 0.3rem; }
+  .section-num { font-family: var(--font-mono); color: var(--accent); font-size: 0.9rem; }
+  .section-head p { margin: 0.4rem 0 0; }
+
+  .diagram-wrap {
+    margin-top: 1.3rem;
+    overflow-x: auto;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 1rem 1.2rem;
+  }
+  svg { display: block; max-width: 100%; height: auto; font-family: var(--font-mono); }
+  figcaption { margin: 0.7rem 0 0; font-size: 0.82rem; color: var(--ink-soft); }
+
+  /* ---------- data sheet / annotation panels ---------- */
+  .panel-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 1rem;
+    margin-top: 1.3rem;
+  }
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 1.1rem 1.3rem;
+  }
+  .panel h3 { margin-bottom: 0.6rem; }
+  .panel .file { font-family: var(--font-mono); font-size: 0.72rem; color: var(--accent); }
+  .code-block {
+    background: var(--paper);
+    border: 1px solid var(--line-soft);
+    border-radius: 3px;
+    padding: 0.6rem 0.75rem;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    overflow-x: auto;
+    white-space: pre;
+    margin: 0.6rem 0 0;
+    color: var(--ink);
+  }
+
+  table { border-collapse: collapse; width: 100%; margin-top: 0.6rem; font-size: 0.85rem; }
+  th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--line-soft); }
+  th { font-family: var(--font-mono); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-soft); font-weight: 600; }
+  td.num, th.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
+
+  /* ---------- stat tiles ---------- */
+  .stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; margin-top: 1.3rem; }
+  .stat {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 1rem 1.1rem;
+  }
+  .stat .figure { font-family: var(--font-display); font-size: 2.1rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .stat .figure .of { font-size: 1.1rem; color: var(--ink-soft); font-weight: 500; }
+  .stat .label { font-family: var(--font-mono); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-soft); margin-top: 0.2rem; }
+  .stat.accent { border-color: var(--accent); }
+  .stat.warn { border-color: var(--warn); }
+
+  .callout {
+    margin-top: 1.3rem;
+    background: var(--accent-soft);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    padding: 1.1rem 1.3rem;
+  }
+  .callout h3 { margin-bottom: 0.4rem; }
+  .callout p { max-width: none; color: var(--ink); }
+  .callout p.sub { color: var(--ink-soft); margin-top: 0.5rem; font-size: 0.85rem; }
+
+  footer {
+    margin-top: 3.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--line);
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--ink-soft);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 1rem;
+  }
+
+  a { color: var(--accent); }
+  ::selection { background: var(--accent-soft); }
+</style>
+
+<div class="sheet">
+
+  <div class="titleblock">
+    <div>
+      <p class="kicker">Build reference · rev. 1</p>
+      <h1>RAG Pipeline Schematic</h1>
+      <p class="sub">Partner-support assistant, POC scale — mapped against the production<br>architecture it's modeled on.</p>
+    </div>
+    <dl class="meta-grid">
+      <dt>Store</dt><dd>Postgres 14 + pgvector 0.8</dd>
+      <dt>Corpus</dt><dd>18 Autodesk PWS PDFs / 838 chunks</dd>
+      <dt>Embed</dt><dd>Qwen3-Embedding-8B (1536d)</dd>
+      <dt>Rerank</dt><dd>cross-encoder/ms-marco-MiniLM-L-6</dd>
+      <dt>Serve</dt><dd>FastAPI + static UI</dd>
+    </dl>
+  </div>
+
+  <div class="legend">
+    <span class="item"><span class="stamp built"></span> built &amp; tested</span>
+    <span class="item"><span class="stamp simplified"></span> simplified vs. case study</span>
+    <span class="item"><span class="stamp todo"></span> deliberately not implemented</span>
+  </div>
+
+  <!-- ========================= INGESTION ========================= -->
+  <section>
+    <div class="section-head">
+      <span class="section-num">01</span>
+      <h2>Ingestion pipeline</h2>
+    </div>
+    <p>Offline. Runs on demand via <code>python -m ingest.ingest</code>; idempotent — a document's <code>content_hash</code> (raw file bytes) is checked against the registry before anything is re-embedded.</p>
+
+    <figure class="diagram-wrap">
+      <svg viewBox="0 0 1100 210" role="img" aria-label="Ingestion pipeline: PDF reference manuals are chunked page by page, embedded via OpenRouter, and upserted into the chunks table, while a documents registry tracks content hashes to skip unchanged files.">
+        <defs>
+          <marker id="arrow1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+          </marker>
+        </defs>
+        <g fill="none" stroke="currentColor" stroke-width="1.5">
+          <line x1="150" y1="60" x2="196" y2="60" marker-end="url(#arrow1)"/>
+          <line x1="346" y1="60" x2="392" y2="60" marker-end="url(#arrow1)"/>
+          <line x1="542" y1="60" x2="588" y2="60" marker-end="url(#arrow1)"/>
+          <line x1="738" y1="60" x2="784" y2="60" marker-end="url(#arrow1)"/>
+          <polyline points="900,90 900,120 840,120 840,150" marker-end="url(#arrow1)"/>
+        </g>
+
+        <!-- boxes: corpus, chunk, embed, upsert, chunks table -->
+        <g font-size="13">
+          <g>
+            <rect x="10" y="30" width="140" height="60" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+            <circle cx="140" cy="40" r="5" fill="var(--accent)"/>
+            <text x="80" y="55" text-anchor="middle" font-weight="600">PWS PDFs</text>
+            <text x="80" y="72" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">18 docs, all public</text>
+          </g>
+          <g>
+            <rect x="196" y="30" width="150" height="60" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+            <circle cx="336" cy="40" r="5" fill="var(--accent)"/>
+            <text x="271" y="55" text-anchor="middle" font-weight="600">chunk</text>
+            <text x="271" y="72" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">per page + doc title (§05)</text>
+          </g>
+          <g>
+            <rect x="392" y="30" width="150" height="60" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+            <circle cx="532" cy="40" r="5" fill="var(--accent)"/>
+            <text x="467" y="55" text-anchor="middle" font-weight="600">embed</text>
+            <text x="467" y="72" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">OpenRouter, batched</text>
+          </g>
+          <g>
+            <rect x="588" y="30" width="150" height="60" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+            <circle cx="728" cy="40" r="5" fill="var(--accent)"/>
+            <text x="663" y="55" text-anchor="middle" font-weight="600">upsert</text>
+            <text x="663" y="72" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">delete + reinsert</text>
+          </g>
+          <g>
+            <rect x="784" y="20" width="180" height="80" rx="3" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.5"/>
+            <text x="874" y="48" text-anchor="middle" font-weight="600">chunks</text>
+            <text x="874" y="64" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">tsv → GIN</text>
+            <text x="874" y="78" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">embedding → HNSW</text>
+          </g>
+          <g>
+            <rect x="740" y="150" width="220" height="50" rx="3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 3"/>
+            <circle cx="960" cy="160" r="5" fill="var(--accent)"/>
+            <text x="850" y="180" text-anchor="middle" font-size="11.5">documents registry</text>
+            <text x="850" y="194" text-anchor="middle" font-size="10" fill="var(--ink-soft)">content_hash, last_seen_at</text>
+          </g>
+        </g>
+      </svg>
+      <figcaption>Unchanged docs are skipped by hash before any embedding call runs; a changed doc's old chunks are deleted first so a stale row never survives in either index.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ========================= QUERY PIPELINE ========================= -->
+  <section>
+    <div class="section-head">
+      <span class="section-num">02</span>
+      <h2>Query pipeline</h2>
+    </div>
+    <p>Live, per request. Two off-ramps leave the main line: a permission refusal decided from intent + role alone, before the corpus is ever touched, and an abstain decided from retrieval confidence, before the LLM is ever called.</p>
+
+    <figure class="diagram-wrap">
+      <svg viewBox="0 0 1260 300" role="img" aria-label="Query pipeline: a user query passes through auth and ACL, branching to a permission refusal if the query names a restricted category the role can't see, otherwise proceeding through query embedding, hybrid retrieval with RRF fusion, cross-encoder reranking, and a confidence gate that either abstains or continues to the LLM for a cited answer.">
+        <defs>
+          <marker id="arrow2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+          </marker>
+        </defs>
+
+        <!-- main line arrows -->
+        <g fill="none" stroke="currentColor" stroke-width="1.5">
+          <line x1="160" y1="72" x2="200" y2="72" marker-end="url(#arrow2)"/>
+          <line x1="342" y1="72" x2="382" y2="72" marker-end="url(#arrow2)"/>
+          <line x1="524" y1="72" x2="564" y2="72" marker-end="url(#arrow2)"/>
+          <line x1="706" y1="72" x2="746" y2="72" marker-end="url(#arrow2)"/>
+          <line x1="888" y1="72" x2="928" y2="72" marker-end="url(#arrow2)"/>
+          <line x1="1070" y1="72" x2="1110" y2="72" marker-end="url(#arrow2)"/>
+          <!-- branch A: permission refusal, drops from Auth+ACL -->
+          <polyline points="272,104 272,150 370,150 370,180" stroke="var(--restrict)" marker-end="url(#arrow2)" style="color:var(--restrict)"/>
+          <!-- branch B: abstain, drops from Confidence Gate -->
+          <polyline points="1000,104 1000,150 1050,150 1050,180" stroke="var(--warn)" marker-end="url(#arrow2)" style="color:var(--warn)"/>
+        </g>
+
+        <g font-size="13">
+          <!-- 0 User Query -->
+          <rect x="20" y="40" width="140" height="64" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <circle cx="150" cy="50" r="5" fill="var(--accent)"/>
+          <text x="90" y="68" text-anchor="middle" font-weight="600">User query</text>
+          <text x="90" y="85" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">chat.py</text>
+
+          <!-- 1 Auth+ACL -->
+          <rect x="202" y="40" width="140" height="64" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <circle cx="332" cy="50" r="5" fill="var(--accent)"/>
+          <text x="272" y="68" text-anchor="middle" font-weight="600">Auth + ACL</text>
+          <text x="272" y="85" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">groups from role/partner</text>
+
+          <!-- 2 Embed query -->
+          <rect x="384" y="40" width="140" height="64" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <circle cx="514" cy="50" r="5" fill="var(--accent)"/>
+          <text x="454" y="68" text-anchor="middle" font-weight="600">Embed query</text>
+          <text x="454" y="85" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">same model as ingest</text>
+
+          <!-- 3 Hybrid retrieve -->
+          <rect x="566" y="40" width="140" height="64" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <circle cx="696" cy="50" r="5" fill="var(--accent)"/>
+          <text x="636" y="60" text-anchor="middle" font-weight="600">Hybrid retrieve</text>
+          <text x="636" y="76" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">GIN + HNSW</text>
+          <text x="636" y="90" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">→ RRF fuse</text>
+
+          <!-- 4 Rerank -->
+          <rect x="748" y="40" width="140" height="64" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <circle cx="878" cy="50" r="5" fill="var(--accent)"/>
+          <text x="818" y="60" text-anchor="middle" font-weight="600">Rerank</text>
+          <text x="818" y="76" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">cross-encoder</text>
+          <text x="818" y="90" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">top 20 → scored</text>
+
+          <!-- 5 Confidence gate -->
+          <rect x="930" y="40" width="140" height="64" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <circle cx="1060" cy="50" r="5" fill="var(--accent)"/>
+          <text x="1000" y="60" text-anchor="middle" font-weight="600">Confidence gate</text>
+          <text x="1000" y="76" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">rerank score ≥ 0.30</text>
+          <text x="1000" y="90" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">→ continue</text>
+
+          <!-- 6 LLM -->
+          <rect x="1112" y="40" width="130" height="64" rx="3" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.5"/>
+          <text x="1177" y="68" text-anchor="middle" font-weight="600">LLM</text>
+          <text x="1177" y="85" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">cited answer</text>
+
+          <!-- Branch A box -->
+          <rect x="250" y="180" width="240" height="66" rx="3" fill="var(--restrict-soft)" stroke="var(--restrict)" stroke-width="1.5"/>
+          <text x="370" y="202" text-anchor="middle" font-weight="600" fill="var(--restrict)">Permission refusal</text>
+          <text x="370" y="219" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">query names a restricted category</text>
+          <text x="370" y="233" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">role lacks it → refuse, skip retrieval</text>
+
+          <!-- Branch B box -->
+          <rect x="930" y="180" width="240" height="66" rx="3" fill="var(--warn-soft)" stroke="var(--warn)" stroke-width="1.5"/>
+          <text x="1050" y="202" text-anchor="middle" font-weight="600" fill="var(--warn)">Abstain</text>
+          <text x="1050" y="219" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">rerank score &lt; 0.30</text>
+          <text x="1050" y="233" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">"I don't have that." — no LLM call</text>
+        </g>
+      </svg>
+      <figcaption>Both off-ramps produce a real, valid answer — a refusal or an abstain — rather than letting an unanswerable or unauthorized question reach generation. The rerank step (§04) is what makes the gate's threshold trustworthy.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ========================= RETRIEVER INTERNALS ========================= -->
+  <section>
+    <div class="section-head">
+      <span class="section-num">03</span>
+      <h2>Retriever internals</h2>
+    </div>
+    <p>One <code>chunks</code> table, two index arms, one round trip each. The permission filter runs as a predicate inside both index scans, not as a step afterward.</p>
+
+    <div class="panel-grid">
+      <div class="panel">
+        <h3>ACL predicate</h3>
+        <p class="file">retrieval/hybrid_search.py</p>
+        <div class="code-block">WHERE acl && :user_groups
+  AND index_version = 1</div>
+        <p style="margin-top:0.6rem; max-width:none;">Applied identically on both arms. A restricted chunk cannot enter the candidate set for a session lacking the matching group — enforced before ranking, not after.</p>
+      </div>
+      <div class="panel">
+        <h3>RRF fusion</h3>
+        <p class="file">retrieval/rrf.py</p>
+        <div class="code-block">score(d) = Σ 1 / (60 + rank_arm(d))</div>
+        <p style="margin-top:0.6rem; max-width:none;">Fuses on rank, not raw score — cosine distance and <code>ts_rank_cd</code> live on incomparable scales, so rank is the only fair currency between them. Over-fetch: 50 rows/arm.</p>
+      </div>
+      <div class="panel">
+        <h3>Keyword arm, corrected</h3>
+        <p class="file">retrieval/hybrid_search.py</p>
+        <div class="code-block">plainto_tsquery → 'a' &amp; 'b' &amp; 'c'
+rewritten to 'a' | 'b' | 'c'</div>
+        <p style="margin-top:0.6rem; max-width:none;">Postgres's default ANDs every query term, so one off-corpus word ("work" in "how does the downgrade policy work") zeroed an otherwise perfect match. Rewritten to OR; <code>ts_rank_cd</code> still rewards fuller overlap.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================= CONFIDENCE GATE LESSON ========================= -->
+  <section>
+    <div class="section-head">
+      <span class="section-num">04</span>
+      <h2>What broke the confidence gate — twice</h2>
+    </div>
+    <p>The case study's gate reads post-<em>rerank</em> scores. This POC didn't have one at first (§02 marked it TODO), which forced the gate onto weaker signals — and each one broke in its own way as the system evolved.</p>
+
+    <div class="callout">
+      <h3>Round 1 — RRF rank is not a confidence signal</h3>
+      <p>pgvector's HNSW arm always returns its <em>k</em> nearest neighbours, relevant or not — an on-topic query and an off-topic one produce the same rank-1…50 shape, just anchored at different absolute similarities. Gating on the fused rank score alone abstained on real answers and answered on nonsense with equal confidence.</p>
+      <p class="sub">Interim fix: gate on raw cosine similarity instead (bounded, comparable across queries) — worked against the OpenAI embedding model on the original synthetic corpus.</p>
+    </div>
+
+    <div class="callout" style="background:var(--restrict-soft); border-color:var(--restrict);">
+      <h3>Round 2 — raw similarity doesn't transfer across embedding models</h3>
+      <p>Switching to Qwen3-Embedding-8B for the real corpus broke the "fixed" gate immediately: an off-corpus query ("Can I integrate with Salesforce?") scored <em>higher</em> cosine similarity (0.68) than a genuinely relevant match ("agency commission rate", 0.66) — both shared generic API vocabulary, which is all a bi-encoder's angle-comparison can see. No threshold separates the two classes on this model.</p>
+      <p class="sub">Real fix: build the cross-encoder rerank step (§02) and point the gate at its calibrated 0-1 relevance score instead. Raw similarity is now only a documented <code>degraded.rerank</code> fallback.</p>
+    </div>
+
+    <table>
+      <thead><tr><th>Query</th><th class="num">Cosine sim (misleading)</th><th class="num">Rerank score (correct)</th><th>Verdict</th></tr></thead>
+      <tbody>
+        <tr><td>“Can I integrate the Order API with Salesforce?”</td><td class="num">0.684</td><td class="num">0.101</td><td>correctly abstains</td></tr>
+        <tr><td>“What is the agency commission rate?” (as principal)</td><td class="num">0.664</td><td class="num">0.999</td><td>correctly answers</td></tr>
+        <tr><td>“How do I authenticate to the API?”</td><td class="num">—</td><td class="num">0.999</td><td>correctly answers</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ========================= CHUNK IDENTITY LOSS ========================= -->
+  <section>
+    <div class="section-head">
+      <span class="section-num">05</span>
+      <h2>A chunk can't be found for identity it never states</h2>
+    </div>
+    <p>A different failure class from §04 — this one's the case study's own "chunking failure" category, generalized from a chunk boundary to a <em>document</em> boundary.</p>
+
+    <div class="callout" style="background:var(--warn-soft); border-color:var(--warn);">
+      <h3>"which apis are available for buy sell model" → abstained (wrongly)</h3>
+      <p>Retrieval found the exact right page at rank 1 — but reranked it 0.03 (abstain). Reading the actual chunk text explained why: the word <strong>"BuySell" never appears anywhere in that PDF</strong>, not on the page, not even on the title page. It's a filename-only distinction (<code>BuySell-pws-place-order-api-implementation-guide.pdf</code> vs. an <code>NxM-</code> counterpart covering the other business model) — invisible to embedding, keyword index, and reranker alike, none of which ever see filenames.</p>
+      <p class="sub">Fix: prefix every chunk with a filename-derived title (<code>[BuySell PWS Place Order API Implementation Guide]</code>) before it's embedded, indexed, or reranked — "contextual retrieval." The fix had to come from the filename specifically, since the document's own content doesn't state its business model either. Score went from 0.03 → 0.55 on re-ingestion. Kept as a permanent case in <code>eval/golden_set.json</code>.</p>
+    </div>
+  </section>
+
+  <!-- ========================= EVAL RESULTS ========================= -->
+  <section>
+    <div class="section-head">
+      <span class="section-num">06</span>
+      <h2>Eval loop</h2>
+    </div>
+    <p>16-query golden set against the real corpus (12 answerable, 4 deliberately not) run via <code>python -m eval.run_eval</code>. Two-layer defense against the unanswerable ones: the fast retrieval gate catches clear misses before an LLM call; the LLM's own grounding instruction catches the subtler content gaps the gate lets through.</p>
+
+    <div class="stat-row">
+      <div class="stat accent">
+        <div class="figure">12<span class="of">/12</span></div>
+        <div class="label">recall@5</div>
+      </div>
+      <div class="stat accent">
+        <div class="figure">12<span class="of">/12</span></div>
+        <div class="label">recall@10</div>
+      </div>
+      <div class="stat warn">
+        <div class="figure">2<span class="of">/4</span></div>
+        <div class="label">gate abstains (fast layer)</div>
+      </div>
+      <div class="stat accent">
+        <div class="figure">4<span class="of">/4</span></div>
+        <div class="label">correct end-to-end (with LLM backstop)</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================= SIMPLIFICATIONS ========================= -->
+  <section>
+    <div class="section-head">
+      <span class="section-num">07</span>
+      <h2>Simplified vs. the case study</h2>
+    </div>
+    <table>
+      <thead><tr><th>Component</th><th>Case study</th><th>This POC</th></tr></thead>
+      <tbody>
+        <tr><td>Rerank</td><td>Cohere / BGE cross-encoder</td><td><span class="stamp built" style="vertical-align:-1px;"></span> built — <code>ms-marco-MiniLM-L-6-v2</code>, see §04</td></tr>
+        <tr><td>Confidence gate</td><td>reads post-rerank scores</td><td><span class="stamp built" style="vertical-align:-1px;"></span> built — reads rerank score directly; raw-similarity path kept only as documented fallback</td></tr>
+        <tr><td>ACL enforcement</td><td>partner/principal restricted data</td><td><span class="stamp simplified" style="vertical-align:-1px;"></span> mechanism built &amp; tested, but live KB is currently all-public — dormant until the pricelist is ingested (see README)</td></tr>
+        <tr><td>Query rewriter</td><td>conditional rewrite step</td><td><span class="stamp todo" style="vertical-align:-1px;"></span> query goes straight to embedding</td></tr>
+        <tr><td>Reindexing</td><td>blue/green + alias flip</td><td><span class="stamp todo" style="vertical-align:-1px;"></span> ingestion re-embeds in place</td></tr>
+        <tr><td>Observability</td><td>OpenTelemetry → Langfuse</td><td><span class="stamp simplified" style="vertical-align:-1px;"></span> one JSON line/request in <code>logs/requests.jsonl</code></td></tr>
+        <tr><td>Cache lookup</td><td>query+version+permission key</td><td><span class="stamp todo" style="vertical-align:-1px;"></span> not implemented</td></tr>
+        <tr><td>Spreadsheet/deck ingestion</td><td>n/a (this KB's own gap)</td><td><span class="stamp todo" style="vertical-align:-1px;"></span> PDFs only — pricelist (.xlsm) and decks (.pptx) not ingested</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <footer>
+    <span>ingest.ingest · retrieval.cli_test · eval.run_eval · uvicorn app.main:app</span>
+    <span>/root/RAG-ChatBot</span>
+  </footer>
+
+</div>
