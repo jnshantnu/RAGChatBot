@@ -17,7 +17,7 @@ GOLDEN_SET_PATH = os.path.join(os.path.dirname(__file__), "golden_set.json")
 
 # Maximally permissive groups so recall isn't confounded by ACL filtering --
 # ACL correctness is a separate, deliberate test (see README).
-ALL_GROUPS = ["public", "partner:acme", "partner:globex", "role:principal"]
+ALL_GROUPS = ["public", "partner:acme", "partner:globex", "role:principal", "role:distributor"]
 
 
 def run_eval():
@@ -34,8 +34,14 @@ def run_eval():
     with psycopg.connect(config.DATABASE_URL) as conn:
         for case in golden_set:
             result = retrieve(conn, case["query"], ALL_GROUPS)
-            doc_ids_top5 = [r.doc_id for r in result.candidates[:5]]
-            doc_ids_top10 = [r.doc_id for r in result.candidates[:10]]
+            # Recall should measure citable grounding, same as what the user
+            # actually gets cited -- internal docs (e.g. ADSK-BIZ-RULES.md) can
+            # legitimately outrank public chunks for a shared topic without that
+            # being a retrieval regression, since pipeline.py gives citable and
+            # internal chunks their own top-K slots downstream of this list.
+            citable_candidates = [r for r in result.candidates if not r.is_internal]
+            doc_ids_top5 = [r.doc_id for r in citable_candidates[:5]]
+            doc_ids_top10 = [r.doc_id for r in citable_candidates[:10]]
 
             if case["answerable"]:
                 answerable_count += 1

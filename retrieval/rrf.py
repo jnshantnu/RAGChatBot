@@ -15,7 +15,12 @@ class FusedResult:
     chunk_text: str
     fused_score: float
     arms: list[str]  # which arm(s) contributed: "keyword", "semantic"
+    metadata: dict = None
     rerank_score: float | None = None  # set by retrieval/rerank.py; None if rerank was skipped
+
+    @property
+    def is_internal(self) -> bool:
+        return bool((self.metadata or {}).get("internal"))
 
 
 def reciprocal_rank_fusion(keyword_results: list[Candidate], semantic_results: list[Candidate]) -> list[FusedResult]:
@@ -29,6 +34,7 @@ def reciprocal_rank_fusion(keyword_results: list[Candidate], semantic_results: l
             chunk_text=cand.chunk_text,
             fused_score=1.0 / (K + rank),
             arms=["keyword"],
+            metadata=cand.metadata,
         )
 
     for rank, cand in enumerate(semantic_results, start=1):
@@ -44,6 +50,7 @@ def reciprocal_rank_fusion(keyword_results: list[Candidate], semantic_results: l
                 chunk_text=cand.chunk_text,
                 fused_score=contribution,
                 arms=["semantic"],
+                metadata=cand.metadata,
             )
 
     return sorted(fused.values(), key=lambda r: r.fused_score, reverse=True)

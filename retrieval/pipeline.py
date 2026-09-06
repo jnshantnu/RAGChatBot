@@ -60,11 +60,19 @@ def retrieve(conn: psycopg.Connection, query: str, user_groups: list[str]) -> Re
 
     gate = confidence_gate(ranked, semantic_results, keyword_results, reranked=not degraded_rerank)
 
+    # Citable and internal chunks get their own top-K slots rather than sharing
+    # one slice of `ranked` -- otherwise a few dominant internal matches (e.g.
+    # ADSK-BIZ-RULES.md scoring 0.99) crowd out real citable content, leaving
+    # only near-zero-score filler in what's shown to the user as "top sources".
+    citable_ranked = [r for r in ranked if not r.is_internal]
+    internal_ranked = [r for r in ranked if r.is_internal]
+    top_k = citable_ranked[:TOP_K] + internal_ranked[:TOP_K]
+
     return RetrievalResult(
         query=query,
         user_groups=user_groups,
         candidates=ranked,
-        top_k=ranked[:TOP_K],
+        top_k=top_k,
         gate=gate,
         degraded_rerank=degraded_rerank,
         timings_ms=timings,

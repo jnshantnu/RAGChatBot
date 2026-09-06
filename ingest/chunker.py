@@ -46,6 +46,10 @@ def chunk_markdown(raw_text: str, fallback_doc_id: str) -> list[Chunk]:
     doc_id = frontmatter.get("doc_id", fallback_doc_id)
     acl = frontmatter.get("acl", ["public"])
     category = frontmatter.get("category", "")
+    # internal: true -- chunk is embedded/searched normally so it can inform an
+    # answer's content, but llm/generate.py never gives it a citation number and
+    # chat.py strips it from any score/debug output before it leaves the server.
+    internal = frontmatter.get("internal", "false").strip().lower() == "true"
 
     # Split on lines starting with '#' (any heading level), keeping the heading with its section.
     sections = re.split(r"\n(?=#{1,6}\s)", body.strip())
@@ -65,7 +69,7 @@ def chunk_markdown(raw_text: str, fallback_doc_id: str) -> list[Chunk]:
                 ordinal=ordinal,
                 heading=heading,
                 text=section,
-                metadata={"category": category},
+                metadata={"category": category, "internal": internal},
                 acl=acl,
             )
         )

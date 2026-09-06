@@ -37,20 +37,48 @@ def _slugify(name: str) -> str:
     return slug
 
 
+_BUSINESS_MODEL_PATTERNS = [
+    (re.compile(r"buy.?sell", re.IGNORECASE), "buysell", "BuySell"),
+    (re.compile(r"nxm", re.IGNORECASE), "nxm", "NxM"),
+]
+
+
+def _detect_business_model(filename: str) -> tuple[str, str] | None:
+    """Finds the business-model marker anywhere in the filename (not just a
+    hyphen-delimited leading token, e.g. "BuySell-pws-..." and "NxMOverviewDeck"
+    both need to match) and returns (category, canonical_label)."""
+    for pattern, category, label in _BUSINESS_MODEL_PATTERNS:
+        if pattern.search(filename):
+            return category, label
+    return None
+
+
+# Per ADSK-BIZ-RULES.md: in the Buy Sell model, only Distributors can place
+# orders to Autodesk -- Resellers cannot. These two manuals are entirely
+# dedicated to the distributor-only APIs (unlike the general implementation
+# guide, which covers all 5 Buy-Sell APIs together and can't be cleanly split
+# at page level without also hiding legitimate reseller-facing content like
+# GetOrderStatus/GetOrderDetails/GetInvoice). This is a real, document-level
+# ACL boundary, not just narrative text -- a reseller session's retrieval
+# query filters these out at the SQL level before anything reaches the LLM.
+_DISTRIBUTOR_ONLY_FILES = {
+    "BuySell-pws-get-myprice-service-reference-manual.pdf",
+    "BuySell-pws-placeorder-v2-service-reference-manual.pdf",
+}
+
+
 def _pdf_acl_and_category(filename: str) -> tuple[list[str], str]:
-    """All current PDFs are public reference documentation; the one restricted
-    file in this KB (a pricing spreadsheet) isn't a PDF and isn't ingested yet.
-    Category is inferred from Autodesk's own naming convention."""
-    if filename.startswith("BuySell"):
-        category = "buysell"
-    elif filename.startswith("NxM"):
-        category = "nxm"
-    else:
-        category = "other"
-    return ["public"], category
+    """Most PDFs are public reference documentation; a couple are restricted
+    per real business rules (see _DISTRIBUTOR_ONLY_FILES above). The one
+    other restricted file in this KB (a pricing spreadsheet) isn't a PDF and
+    isn't ingested yet."""
+    match = _detect_business_model(filename)
+    category = match[0] if match else "other"
+    acl = ["role:distributor"] if filename in _DISTRIBUTOR_ONLY_FILES else ["public"]
+    return acl, category
 
 
-_ACRONYMS = {"pws": "PWS", "api": "API", "v2": "v2", "v3": "v3", "nxm": "NxM", "buysell": "BuySell"}
+_ACRONYMS = {"pws": "PWS", "api": "API", "v2": "v2", "v3": "v3"}
 
 
 def _doc_title(filename: str) -> str:
@@ -58,10 +86,27 @@ def _doc_title(filename: str) -> str:
     the business-model identity (BuySell vs NxM) is a naming convention that
     never appears inside the document body itself (verified by inspection), so
     only the filename can supply it. See chunk_pdf's docstring for why this
-    matters."""
+    matters.
+
+    The business-model marker is pulled out explicitly first (rather than
+    relying purely on hyphen-splitting) because not every filename separates
+    words with hyphens -- "NxMOverviewDeck.pdf" has no hyphens at all, and a
+    naive split would produce "Nxmoverviewdeck", silently losing the exact
+    signal this function exists to preserve.
+    """
     stem = os.path.splitext(filename)[0]
-    words = re.split(r"[-_]+", stem)
-    return " ".join(_ACRONYMS.get(w.lower(), w.capitalize()) for w in words)
+    label = None
+    for pattern, _, model_label in _BUSINESS_MODEL_PATTERNS:
+        found = pattern.search(stem)
+        if found:
+            label = model_label
+            stem = stem[: found.start()] + stem[found.end() :]
+            break
+
+    stem = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", stem)  # split camelCase boundaries
+    words = [w for w in re.split(r"[-_\s]+", stem) if w]
+    title_words = [_ACRONYMS.get(w.lower(), w.capitalize()) for w in words]
+    return " ".join(([label] if label else []) + title_words)
 
 
 def _embed_in_batches(texts: list[str]) -> list[list[float]]:

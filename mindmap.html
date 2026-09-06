@@ -448,18 +448,24 @@ rewritten to 'a' | 'b' | 'c'</div>
 
     <div class="callout" style="background:var(--restrict-soft); border-color:var(--restrict);">
       <h3>Round 2 — raw similarity doesn't transfer across embedding models</h3>
-      <p>Switching to Qwen3-Embedding-8B for the real corpus broke the "fixed" gate immediately: an off-corpus query ("Can I integrate with Salesforce?") scored <em>higher</em> cosine similarity (0.68) than a genuinely relevant match ("agency commission rate", 0.66) — both shared generic API vocabulary, which is all a bi-encoder's angle-comparison can see. No threshold separates the two classes on this model.</p>
+      <p>Switching to Qwen3-Embedding-8B for the real corpus broke the "fixed" gate immediately: an off-corpus query ("Can I integrate with Salesforce?") scored a <em>higher</em> cosine similarity than a genuinely relevant match on the corpus at the time — both shared generic API vocabulary, which is all a bi-encoder's angle-comparison can see. No threshold separated the two classes on this model.</p>
       <p class="sub">Real fix: build the cross-encoder rerank step (§02) and point the gate at its calibrated 0-1 relevance score instead. Raw similarity is now only a documented <code>degraded.rerank</code> fallback.</p>
     </div>
 
     <table>
-      <thead><tr><th>Query</th><th class="num">Cosine sim (misleading)</th><th class="num">Rerank score (correct)</th><th>Verdict</th></tr></thead>
+      <thead><tr><th>Query</th><th class="num">Rerank score</th><th>Gate verdict</th><th>Final answer</th></tr></thead>
       <tbody>
-        <tr><td>“Can I integrate the Order API with Salesforce?”</td><td class="num">0.684</td><td class="num">0.101</td><td>correctly abstains</td></tr>
-        <tr><td>“What is the agency commission rate?” (as principal)</td><td class="num">0.664</td><td class="num">0.999</td><td>correctly answers</td></tr>
-        <tr><td>“How do I authenticate to the API?”</td><td class="num">—</td><td class="num">0.999</td><td>correctly answers</td></tr>
+        <tr><td>“How do I authenticate to the Partner WebServices API?”</td><td class="num">0.999</td><td>continues</td><td>correct, cited</td></tr>
+        <tr><td>“Does the API support GraphQL?”</td><td class="num">0.002</td><td>abstains</td><td>“I don't have that” (no LLM call)</td></tr>
+        <tr><td>“Can I integrate the Order API with Salesforce directly?”</td><td class="num">0.462</td><td>continues</td><td>“I don't have that” (LLM backstop)</td></tr>
       </tbody>
     </table>
+    <p style="margin-top:0.6rem; font-size:0.85rem;">Live numbers, reproducible via <code>retrieval.cli_test</code> — not fixed constants; they shift whenever chunk text changes (see the Salesforce row below).</p>
+
+    <div class="callout" style="background:var(--warn-soft); border-color:var(--warn); margin-top:1rem;">
+      <h3>A later fix moved that Salesforce score — on purpose, with a trade-off</h3>
+      <p>After §05's doc-title prefix was added, the Salesforce query's gate score rose from 0.10 to 0.46 — high enough to now pass the gate — because the prefixed title text made the whole "Place Order API" document read as more generally API/integration-relevant, the same effect that correctly fixed §05's bug. The query still gets the right final answer, but now via the LLM's grounding refusal (the second defense layer) rather than the gate catching it outright. A concrete, measured example of the recall/precision trade-off eval loops exist to catch — <code>eval/run_eval.py</code> only checks the gate layer, so this kind of shift is exactly what its "note" at the bottom is warning you to check by hand.</p>
+    </div>
   </section>
 
   <!-- ========================= CHUNK IDENTITY LOSS ========================= -->

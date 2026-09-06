@@ -33,7 +33,8 @@ def main():
     print(f"{'rank':4} {'rerank':7} {'fused':7} {'arms':20} {'doc_id':28} heading")
     for i, r in enumerate(result.candidates[:10], start=1):
         rerank_str = f"{r.rerank_score:.4f}" if r.rerank_score is not None else "-"
-        print(f"{i:<4} {rerank_str:<7} {r.fused_score:<7.4f} {','.join(r.arms):20} {r.doc_id:28} {r.heading}")
+        flag = " [INTERNAL -- never citable/exposed]" if r.is_internal else ""
+        print(f"{i:<4} {rerank_str:<7} {r.fused_score:<7.4f} {','.join(r.arms):20} {r.doc_id:28} {r.heading}{flag}")
 
 
 if __name__ == "__main__":

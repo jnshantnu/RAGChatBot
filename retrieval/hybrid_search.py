@@ -19,6 +19,7 @@ class Candidate:
     heading: str
     chunk_text: str
     score: float  # arm-native score: ts_rank_cd (higher=better) or cosine distance (lower=better)
+    metadata: dict
 
 
 def keyword_search(conn: psycopg.Connection, query_text: str, user_groups: list[str], limit: int = OVER_FETCH) -> list[Candidate]:
@@ -32,7 +33,7 @@ def keyword_search(conn: psycopg.Connection, query_text: str, user_groups: list[
         WITH q AS (
             SELECT to_tsquery('english', replace(plainto_tsquery('english', %(q)s)::text, ' & ', ' | ')) AS tsq
         )
-        SELECT chunk_id, doc_id, heading, chunk_text, ts_rank_cd(tsv, q.tsq) AS score
+        SELECT chunk_id, doc_id, heading, chunk_text, ts_rank_cd(tsv, q.tsq) AS score, metadata
         FROM chunks, q
         WHERE acl && %(groups)s
           AND index_version = 1
@@ -49,7 +50,7 @@ def semantic_search(conn: psycopg.Connection, query_embedding: list[float], user
     vector_literal = "[" + ",".join(repr(v) for v in query_embedding) + "]"
     sql = """
         SELECT chunk_id, doc_id, heading, chunk_text,
-               embedding <=> %(vec)s::vector AS distance
+               embedding <=> %(vec)s::vector AS distance, metadata
         FROM chunks
         WHERE acl && %(groups)s
           AND index_version = 1
