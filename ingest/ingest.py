@@ -131,7 +131,7 @@ def _embed_in_batches(texts: list[str]) -> list[list[float]]:
 
 def _load_chunks(path: str, filename: str, fallback_doc_id: str) -> list[Chunk]:
     # Dispatches to the right chunker by extension. Markdown carries its own
-    # doc_id/acl/category/internal via frontmatter; PDFs get theirs assigned
+    # doc_id/acl/category/guaranteed via frontmatter; PDFs get theirs assigned
     # here from the filename convention, since a PDF has no frontmatter to read.
     if filename.endswith(".md"):
         with open(path, encoding="utf-8") as fh:

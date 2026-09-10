@@ -35,10 +35,10 @@ def run_eval():
     answerable_count = 0
     abstain_correct = 0
     unanswerable_count = 0
-    internal_only_correct = 0
-    internal_only_count = 0
-    requires_internal_correct = 0
-    requires_internal_count = 0
+    guaranteed_only_correct = 0
+    guaranteed_only_count = 0
+    requires_guaranteed_correct = 0
+    requires_guaranteed_count = 0
 
     rows = []
     with psycopg.connect(config.DATABASE_URL) as conn:
@@ -46,30 +46,32 @@ def run_eval():
             result = retrieve(conn, case["query"], ALL_GROUPS)
 
             # Independent of the case's main type below: some queries need
-            # internal guidance to score as genuinely relevant (not just
+            # guaranteed content to score as genuinely relevant (not just
             # present -- it's always present now, see retrieval/pipeline.py),
-            # regardless of whether they also have citable grounding.
-            if case.get("requires_internal"):
-                requires_internal_count += 1
-                requires_internal_correct += result.best_internal_score >= MIN_RERANK_SCORE
-            # Recall should measure citable grounding, same as what the user
-            # actually gets cited -- internal docs (e.g. ADSK-BIZ-RULES.md) can
-            # legitimately outrank public chunks for a shared topic without that
-            # being a retrieval regression, since pipeline.py gives citable and
-            # internal chunks their own top-K slots downstream of this list.
-            citable_candidates = [r for r in result.candidates if not r.is_internal]
-            doc_ids_top5 = [r.doc_id for r in citable_candidates[:5]]
-            doc_ids_top10 = [r.doc_id for r in citable_candidates[:10]]
+            # regardless of whether they also have competitive grounding.
+            if case.get("requires_guaranteed"):
+                requires_guaranteed_count += 1
+                requires_guaranteed_correct += result.best_guaranteed_score >= MIN_RERANK_SCORE
+            # Recall should measure competitive grounding, same as what the
+            # user actually gets cited from that pool -- guaranteed docs (e.g.
+            # ADSK-BIZ-RULES.md) can legitimately outrank public chunks for a
+            # shared topic without that being a retrieval regression, since
+            # pipeline.py gives competitive and guaranteed chunks their own
+            # top-K slots downstream of this list.
+            competitive_candidates = [r for r in result.candidates if not r.is_guaranteed]
+            doc_ids_top5 = [r.doc_id for r in competitive_candidates[:5]]
+            doc_ids_top10 = [r.doc_id for r in competitive_candidates[:10]]
 
-            if case.get("internal_only"):
-                # The correct grounding for this query lives only in an internal
-                # doc, which is deliberately excluded from doc_ids_top5/10 above
-                # -- there's no citable doc_id to check recall against. The only
-                # thing worth verifying is that the gate doesn't abstain.
-                internal_only_count += 1
+            if case.get("guaranteed_only"):
+                # The correct grounding for this query lives only in a
+                # guaranteed doc, which is deliberately excluded from
+                # doc_ids_top5/10 above -- there's no competitive doc_id to
+                # check recall against. The only thing worth verifying is that
+                # the gate doesn't abstain.
+                guaranteed_only_count += 1
                 correct = not result.gate.abstain
-                internal_only_correct += correct
-                rows.append((case["query"][:50], "internal_only", "-", "-", result.gate.abstain))
+                guaranteed_only_correct += correct
+                rows.append((case["query"][:50], "guaranteed_only", "-", "-", result.gate.abstain))
             elif case["answerable"]:
                 answerable_count += 1
                 expected = case["expected_doc_ids"]
@@ -92,8 +94,8 @@ def run_eval():
     print(f"recall@5:  {hits_at_5}/{answerable_count}")
     print(f"recall@10: {hits_at_10}/{answerable_count}")
     print(f"retrieval-gate abstain rate on unanswerable: {abstain_correct}/{unanswerable_count}")
-    print(f"internal-only grounding correctly not abstained: {internal_only_correct}/{internal_only_count}")
-    print(f"requires-internal queries scoring internal content relevant: {requires_internal_correct}/{requires_internal_count}")
+    print(f"guaranteed-only grounding correctly not abstained: {guaranteed_only_correct}/{guaranteed_only_count}")
+    print(f"requires-guaranteed queries scoring guaranteed content relevant: {requires_guaranteed_correct}/{requires_guaranteed_count}")
     print(
         "note: this only measures the fast, pre-LLM gate (retrieval/confidence.py). "
         "Queries it doesn't catch still get a real LLM call, whose system prompt "

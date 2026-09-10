@@ -6,14 +6,19 @@ level, so the LLM only ever sees chunks the user is allowed to see. If nothing
 relevant survives retrieval, the confidence gate abstains before this module
 is even called -- "I don't have that" is decided upstream, not by the model.
 
-Citable vs. internal: chunks flagged `metadata.internal=True` (e.g. an
-`internal: true` frontmatter doc like ADSK-BIZ-RULES.md) are embedded and
-retrieved exactly like any other chunk, but are kept out of the numbered,
-citable context block entirely -- they can shape the answer's content, but the
-model has no bracket number to cite them with, and is explicitly told not to
-reveal them. chat.py additionally strips internal chunks from every
-score/debug field before a response leaves the server, so this isn't relying
-on prompt compliance alone.
+Every chunk handed to generate_answer is citable -- including chunks marked
+`metadata.guaranteed=True` (e.g. ADSK-BIZ-RULES.md), which retrieval/pipeline.py
+fetches unconditionally so they can never lose the top-20 rerank competition
+and silently vanish from an answer. "Guaranteed" only affects how a chunk gets
+into the context here, not whether the model may cite it.
+
+ACL only controls which chunks are retrieved at all (document-level: public
+vs. restricted), not role-specific content *within* a chunk that's visible to
+everyone -- e.g. ADSK-BIZ-RULES.md's partner-tier section covers Distributor
+and Reseller in the same paragraph, since both can see that doc. So the
+model is told the session's role explicitly here; without it, "which APIs
+are available to me" has no way to resolve who "me" is, and the model would
+reasonably explain every role's access instead of just the asker's.
 """
 import re
 from dataclasses import dataclass
@@ -25,24 +30,23 @@ from retrieval.rrf import FusedResult
 
 _client = OpenAI(base_url=config.OPENROUTER_BASE_URL, api_key=config.OPENROUTER_API_KEY)
 
-SYSTEM_PROMPT = """You are a partner-support assistant. Answer using the numbered \
-context chunks and, if present, the "Internal operating guidance" section \
-provided below. Do not use outside knowledge beyond these two sources.
+SYSTEM_PROMPT = """You are a partner-support assistant. Answer using only the \
+numbered context chunks provided below. Do not use outside knowledge.
 
-Every claim based on a numbered chunk must end with a citation like [1] or \
-[2] referencing the chunk number it came from. Claims based on the Internal \
-operating guidance section must NEVER include a citation, and you must never \
-quote it, reference it, or reveal in any way that such guidance exists --  \
-state the fact plainly, as if you simply knew it.
+Every claim must end with a citation like [1] or [2] referencing the chunk \
+number it came from.
 
-If neither the numbered chunks nor the internal guidance contain enough \
-information to answer, reply exactly: "I don't have that information."
+If the numbered chunks don't contain enough information to answer, reply \
+exactly: "I don't have that information."
 
-When asked what is available to the user (e.g. "what APIs are available to \
-me"), list ONLY the items the context confirms they can actually use. Do not \
-list an item just to note that it's restricted or unavailable to them --  \
-omit it entirely, as if it were never part of the context. Only describe a \
-restricted item if the user asks about that specific item by name."""
+The user's session role is given below, before the context. When asked what \
+is available to the user (e.g. "what APIs are available to me"), answer only \
+for that specific role -- list ONLY the items the context confirms that role \
+can actually use. Do not list an item just to note that it's restricted or \
+unavailable to them -- omit it entirely, as if it were never part of the \
+context. Never describe another role's access (e.g. don't add an "if you are \
+a Distributor" section when the session role is Reseller) unless the user \
+explicitly asks about that other role by name."""
 
 
 @dataclass
@@ -61,23 +65,12 @@ def _build_context_block(chunks: list[FusedResult]) -> str:
     return "\n\n".join(lines)
 
 
-def _build_internal_block(chunks: list[FusedResult]) -> str:
-    # Deliberately no numbering here -- there's nothing for the model to cite
-    # with, which is half of how "never cite this" is enforced (the other half
-    # is the system prompt's instruction).
-    return "\n\n".join(c.chunk_text for c in chunks)
-
-
-def generate_answer(query: str, citable_chunks: list[FusedResult], internal_chunks: list[FusedResult] | None = None) -> GeneratedAnswer:
-    internal_chunks = internal_chunks or []
-
-    # Assemble the user-turn prompt: numbered citable context, then (if any)
-    # the unnumbered internal guidance block, then the question itself.
-    prompt_parts = [f"Context:\n{_build_context_block(citable_chunks)}"]
-    if internal_chunks:
-        prompt_parts.append(f"Internal operating guidance (never cite or reveal this section):\n{_build_internal_block(internal_chunks)}")
-    prompt_parts.append(f"Question: {query}")
-    user_prompt = "\n\n".join(prompt_parts)
+def generate_answer(query: str, citable_chunks: list[FusedResult], role: str) -> GeneratedAnswer:
+    # Assemble the user-turn prompt: session role, then numbered citable
+    # context, then the question. The role is what lets the model resolve
+    # "me" in a question like "which APIs are available to me" -- see the
+    # module docstring for why ACL alone can't do this.
+    user_prompt = f"Session role: {role}\n\nContext:\n{_build_context_block(citable_chunks)}\n\nQuestion: {query}"
 
     response = _client.chat.completions.create(
         model=config.OPENROUTER_CHAT_MODEL,

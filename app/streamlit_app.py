@@ -31,11 +31,6 @@ def _warm_reranker():
 _warm_reranker()
 
 st.title("Partner AI Chat Bot")
-st.caption(
-    "Knowledge base: 18 Autodesk Partner WebServices reference PDFs (BuySell + NxM). "
-    "All currently public -- role/partner selectors demonstrate the ACL mechanism but "
-    "have nothing restricted to gate yet (see README)."
-)
 
 with st.sidebar:
     st.header("Session")
@@ -43,7 +38,13 @@ with st.sidebar:
         "Partner", ["acme", "globex"],
         format_func=lambda p: {"acme": "Partner A", "globex": "Partner B"}[p],
     )
-    role = st.selectbox("Role", ["reseller", "distributor", "principal"])
+    role = st.selectbox(
+        "Role", ["reseller", "distributor", "solution_provider", "principal"],
+        format_func=lambda r: {
+            "reseller": "Reseller", "distributor": "Distributor",
+            "solution_provider": "Solution Provider", "principal": "Principal",
+        }[r],
+    )
 
 if "history" not in st.session_state:
     st.session_state.history = []
@@ -76,8 +77,6 @@ def render_result(result):
         tags.append(":orange-background[permission refused]")
     if result.degraded_rerank:
         tags.append(":gray-background[degraded.rerank]")
-    if result.internal_guidance_used:
-        tags.append(":violet-background[informed by internal policy]")
     if tags:
         st.markdown(" ".join(tags))
 
@@ -85,6 +84,10 @@ def render_result(result):
 
     if result.citations:
         st.caption("Citations: " + ", ".join(result.citations))
+
+    if result.rewritten_query:
+        with st.expander(f"Rewritten query ({', '.join(result.rewrite_rules_applied)})"):
+            st.write(result.rewritten_query)
 
     if result.scores:
         with st.expander(f"Retrieval scores ({len(result.scores)})"):

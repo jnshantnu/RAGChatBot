@@ -14,7 +14,7 @@ class Chunk:
     ordinal: int        # this chunk's position within its document (0-indexed)
     heading: str        # human-readable label shown in citations/UI, e.g. "Page 6" or a markdown heading
     text: str            # the actual text that gets embedded and stored
-    metadata: dict = field(default_factory=dict)   # category/page/internal flags -- see chunk_pdf/chunk_markdown
+    metadata: dict = field(default_factory=dict)   # category/page/guaranteed flags -- see chunk_pdf/chunk_markdown
     acl: list = field(default_factory=lambda: ["public"])   # groups allowed to retrieve this chunk
 
 
@@ -54,10 +54,11 @@ def chunk_markdown(raw_text: str, fallback_doc_id: str) -> list[Chunk]:
     doc_id = frontmatter.get("doc_id", fallback_doc_id)
     acl = frontmatter.get("acl", ["public"])
     category = frontmatter.get("category", "")
-    # internal: true -- chunk is embedded/searched normally so it can inform an
-    # answer's content, but llm/generate.py never gives it a citation number and
-    # chat.py strips it from any score/debug output before it leaves the server.
-    internal = frontmatter.get("internal", "false").strip().lower() == "true"
+    # guaranteed: true -- chunk is embedded/searched normally, but is also
+    # fetched unconditionally on a separate path (see fetch_guaranteed_chunks
+    # in hybrid_search.py) so it can never lose the top-20 rerank competition
+    # and silently vanish from an answer it should have informed.
+    guaranteed = frontmatter.get("guaranteed", "false").strip().lower() == "true"
 
     # Split on lines starting with '#' (any heading level), keeping the heading with its section.
     sections = re.split(r"\n(?=#{1,6}\s)", body.strip())
@@ -79,7 +80,7 @@ def chunk_markdown(raw_text: str, fallback_doc_id: str) -> list[Chunk]:
                 ordinal=ordinal,
                 heading=heading,
                 text=section,
-                metadata={"category": category, "internal": internal},
+                metadata={"category": category, "guaranteed": guaranteed},
                 acl=acl,
             )
         )

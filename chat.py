@@ -1,4 +1,4 @@
-"""End-to-end query pipeline: permission refusal -> retrieve -> gate -> generate.
+"""End-to-end query pipeline: permission refusal -> rewrite -> retrieve -> gate -> generate.
 
 Mirrors the two distinct "no" paths from the case study's architecture:
   - Permission refusal: decided BEFORE retrieval, from intent + role only.
@@ -6,6 +6,13 @@ Mirrors the two distinct "no" paths from the case study's architecture:
     what exists. Names the category, never a record.
   - Abstain: decided AFTER retrieval, from the confidence gate reading the
     post-fusion score spread -- not from permissions.
+
+Query rewriting (retrieval/query_rewrite.py) sits between those two: it runs
+on the ORIGINAL query (permission refusal already checked it), and its output
+feeds both retrieval and generation. Role is still passed to generate_answer
+separately too, even when a rewrite already mentions it -- the rewriter's
+triggers are pattern-based and won't catch every phrasing, so the explicit
+role stays as a general-purpose backstop rather than the only signal.
 """
 import time
 from dataclasses import asdict, dataclass, field
@@ -14,8 +21,8 @@ import psycopg
 
 import config
 from llm.generate import generate_answer
-from retrieval.confidence import MIN_RERANK_SCORE
 from retrieval.pipeline import retrieve
+from retrieval.query_rewrite import rewrite_query
 
 # Keyword-triggered intent check for principal-only categories. A real system
 # would use a small classifier or the query rewriter; a keyword match is
@@ -51,8 +58,8 @@ class ChatResponse:
     degraded_rerank: bool = True
     scores: list[dict] = field(default_factory=list)
     timings_ms: dict = field(default_factory=dict)
-    internal_guidance_used: bool = False  # non-revealing flag: some internal doc informed this
-    # answer's content, but never its identity or text -- see llm/generate.py
+    rewritten_query: str | None = None  # set only when query_rewrite.py actually changed something
+    rewrite_rules_applied: list[str] = field(default_factory=list)
 
 
 def _user_groups(role: str, partner: str) -> list[str]:
@@ -68,10 +75,9 @@ def _user_groups(role: str, partner: str) -> list[str]:
 
 
 def _visible_scores(results) -> list[dict]:
-    """Debug/UI score payload -- internal chunks are never included, so an
-    internal-only doc can influence an answer's content without its existence
-    ever surfacing in the API response or the web UI's score panel."""
-    return [asdict(r) for r in results if not r.is_internal][:5]
+    """Debug/UI score payload -- everything retrieved is citable now, so
+    nothing is filtered out here beyond capping the length for display."""
+    return [asdict(r) for r in results][:5]
 
 
 def _check_permission_refusal(query: str, user_groups: list[str]) -> str | None:
@@ -107,8 +113,15 @@ def answer_query(query: str, role: str, partner: str) -> ChatResponse:
             timings_ms={"total_ms": round((time.perf_counter() - t_start) * 1000, 1)},
         )
 
+    # Rewrite (retrieval/query_rewrite.py): role injection, synonym
+    # normalization, or bare-term expansion, whichever rule's trigger
+    # matches. A no-op for queries that don't match any trigger -- retrieval
+    # and generation below just get the original query text back unchanged.
+    rewrite = rewrite_query(query, role)
+    retrieval_query = rewrite.rewritten_query
+
     with psycopg.connect(config.DATABASE_URL) as conn:
-        result = retrieve(conn, query, user_groups)
+        result = retrieve(conn, retrieval_query, user_groups)
 
         # Exit 2: retrieval ran, but the confidence gate says nothing found is
         # relevant enough to answer from -- skip the LLM call entirely.
@@ -119,18 +132,18 @@ def answer_query(query: str, role: str, partner: str) -> ChatResponse:
                 abstained=True,
                 degraded_rerank=result.degraded_rerank,
                 scores=_visible_scores(result.candidates),
+                rewritten_query=rewrite.rewritten_query if rewrite.changed else None,
+                rewrite_rules_applied=rewrite.rules_applied,
                 timings_ms={**result.timings_ms, "total_ms": round((time.perf_counter() - t_start) * 1000, 1)},
             )
 
-        # Split the retrieved top-K into what the LLM may cite (public/ACL-
-        # visible content) vs. what it may only use silently (internal
-        # guidance docs like ADSK-BIZ-RULES.md) -- see llm/generate.py.
-        citable = [r for r in result.top_k if not r.is_internal]
-        internal = [r for r in result.top_k if r.is_internal]
-
-        # Exit 3: generate a real, cited answer.
+        # Exit 3: generate a real, cited answer. result.top_k already includes
+        # every guaranteed chunk (e.g. ADSK-BIZ-RULES.md) alongside the
+        # competitive top-K -- all of it is citable, see llm/generate.py. The
+        # role is passed through explicitly too (see module docstring) so the
+        # model can resolve "me" even when the rewriter's triggers didn't fire.
         t0 = time.perf_counter()
-        generated = generate_answer(query, citable, internal)
+        generated = generate_answer(retrieval_query, result.top_k, role)
         result.timings_ms["generate_ms"] = round((time.perf_counter() - t0) * 1000, 1)
 
     return ChatResponse(
@@ -139,9 +152,7 @@ def answer_query(query: str, role: str, partner: str) -> ChatResponse:
         citations=generated.cited_chunk_ids,
         degraded_rerank=result.degraded_rerank,
         scores=_visible_scores(result.top_k),
-        # internal chunks are now *always* attached (see retrieval/pipeline.py),
-        # so their mere presence in `internal` no longer means anything -- this
-        # has to check whether they actually scored as relevant to this query.
-        internal_guidance_used=result.best_internal_score >= MIN_RERANK_SCORE,
+        rewritten_query=rewrite.rewritten_query if rewrite.changed else None,
+        rewrite_rules_applied=rewrite.rules_applied,
         timings_ms={**result.timings_ms, "total_ms": round((time.perf_counter() - t_start) * 1000, 1)},
     )

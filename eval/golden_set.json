@@ -64,8 +64,8 @@
     "query": "which apis i have access to",
     "expected_doc_ids": ["buysell-pws-place-order-api-implementation-guide"],
     "answerable": true,
-    "requires_internal": true,
-    "note": "regression case: the ADSK-BIZ-RULES.md chunk stating GetMyPrice/PlaceOrderV2 are distributor-only lost the competition for one of the top-20 rerank slots against 1,000+ other chunks for this exact phrasing, so the LLM answered from public content alone and incorrectly implied a reseller has access to distributor-only APIs. Fixed by fetching all internal chunks unconditionally, bypassing that competition entirely -- see fetch_internal_chunks in retrieval/hybrid_search.py."
+    "requires_guaranteed": true,
+    "note": "regression case: the ADSK-BIZ-RULES.md chunk stating GetMyPrice/PlaceOrderV2 are distributor-only lost the competition for one of the top-20 rerank slots against 1,000+ other chunks for this exact phrasing, so the LLM answered from public content alone and incorrectly implied a reseller has access to distributor-only APIs. Fixed by fetching all guaranteed chunks unconditionally, bypassing that competition entirely -- see fetch_guaranteed_chunks in retrieval/hybrid_search.py."
   },
   {
     "query": "which apis are available to me?",
@@ -75,9 +75,16 @@
   },
   {
     "query": "which business model is applicable to me? I am in Indonesia",
-    "internal_only": true,
+    "guaranteed_only": true,
     "answerable": true,
-    "note": "regression case: correct grounding is only in ADSK-BIZ-RULES.md (internal, uncited), scoring just 0.0311 at rerank -- but 300x its runner-up (0.0001), a clear standout despite the low absolute score. Caught the bug where a real answer from vague phrasing scored too low even for the lowered 0.20 bar; fixed by the dominance-rescue rule in retrieval/confidence.py."
+    "note": "regression case: correct grounding is only in ADSK-BIZ-RULES.md, scoring just 0.0311 at rerank -- but 300x its runner-up (0.0001), a clear standout despite the low absolute score. Caught the bug where a real answer from vague phrasing scored too low even for the lowered 0.20 bar; fixed by the dominance-rescue rule in retrieval/confidence.py."
+  },
+  {
+    "query": "which apis are available to NBE partners?",
+    "guaranteed_only": true,
+    "answerable": true,
+    "requires_guaranteed": true,
+    "note": "regression case for the PWS API Catalog section added to ADSK-BIZ-RULES.md -- verifies the NBE-model API list surfaces as genuinely relevant grounding for this query, not just present-but-irrelevant."
   },
   {
     "query": "Does the API support GraphQL?",

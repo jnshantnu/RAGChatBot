@@ -22,11 +22,12 @@ class FusedResult:
     rerank_score: float | None = None  # set by retrieval/rerank.py; None if rerank was skipped
 
     @property
-    def is_internal(self) -> bool:
-        # Single source of truth for "is this an internal-guidance chunk" --
-        # chat.py, pipeline.py, and cli_test.py all check this instead of
-        # each re-reading metadata.get("internal") themselves.
-        return bool((self.metadata or {}).get("internal"))
+    def is_guaranteed(self) -> bool:
+        # Single source of truth for "is this a guaranteed-inclusion chunk"
+        # (always fetched, never subject to the rerank cutoff) -- chat.py,
+        # pipeline.py, and cli_test.py all check this instead of each
+        # re-reading metadata.get("guaranteed") themselves.
+        return bool((self.metadata or {}).get("guaranteed"))
 
 
 def reciprocal_rank_fusion(keyword_results: list[Candidate], semantic_results: list[Candidate]) -> list[FusedResult]:

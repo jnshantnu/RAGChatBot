@@ -55,25 +55,26 @@ def keyword_search(conn: psycopg.Connection, query_text: str, user_groups: list[
         return [Candidate(*row) for row in cur.fetchall()]
 
 
-def fetch_internal_chunks(conn: psycopg.Connection, user_groups: list[str]) -> list[Candidate]:
-    """Every internal-guidance chunk visible to this session, fetched directly --
-    no keyword/semantic competition, no OVER_FETCH cutoff. Internal docs (e.g.
-    ADSK-BIZ-RULES.md) are small by design (a handful of chunks) and must never
-    depend on out-competing the rest of a 1,000+ chunk corpus for a spot in the
-    top-20 candidates that make it to reranking -- a real regression we hit:
-    "which apis i have access to" didn't surface the one chunk stating
-    GetMyPrice/PlaceOrderV2 are distributor-only, because it didn't win a slot
-    in that top 20 for this exact phrasing. Business rules that must always be
-    considered can't be left to a competitive process that can silently drop
-    them. `score` is a placeholder (0.0) -- these get reranked separately in
-    retrieval/pipeline.py to judge relevance, not to decide inclusion.
+def fetch_guaranteed_chunks(conn: psycopg.Connection, user_groups: list[str]) -> list[Candidate]:
+    """Every guaranteed-inclusion chunk visible to this session, fetched directly --
+    no keyword/semantic competition, no OVER_FETCH cutoff. Docs marked
+    `guaranteed: true` (e.g. ADSK-BIZ-RULES.md) are small by design (a handful
+    of chunks) and must never depend on out-competing the rest of a 1,000+
+    chunk corpus for a spot in the top-20 candidates that make it to
+    reranking -- a real regression we hit: "which apis i have access to"
+    didn't surface the one chunk stating GetMyPrice/PlaceOrderV2 are
+    distributor-only, because it didn't win a slot in that top 20 for this
+    exact phrasing. Business rules that must always be considered can't be
+    left to a competitive process that can silently drop them. `score` is a
+    placeholder (0.0) -- these get reranked separately in retrieval/pipeline.py
+    to judge relevance, not to decide inclusion.
     """
     sql = """
         SELECT chunk_id, doc_id, heading, chunk_text, 0.0 AS score, metadata
         FROM chunks
         WHERE acl && %(groups)s
           AND index_version = 1
-          AND metadata->>'internal' = 'true'
+          AND metadata->>'guaranteed' = 'true'
     """
     with conn.cursor() as cur:
         cur.execute(sql, {"groups": user_groups})
