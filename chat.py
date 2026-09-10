@@ -14,6 +14,7 @@ import psycopg
 
 import config
 from llm.generate import generate_answer
+from retrieval.confidence import MIN_RERANK_SCORE
 from retrieval.pipeline import retrieve
 
 # Keyword-triggered intent check for principal-only categories. A real system
@@ -35,6 +36,9 @@ PERMISSION_RULES = [
 ]
 
 
+# Everything the FastAPI endpoint (app/main.py) returns to the client, one
+# instance per request. Fields default to the "nothing interesting happened"
+# case so early-return paths (refusal, abstain) don't need to set every field.
 @dataclass
 class ChatResponse:
     query: str
@@ -52,6 +56,9 @@ class ChatResponse:
 
 
 def _user_groups(role: str, partner: str) -> list[str]:
+    # Translates a UI role/partner selection into the ACL group list used to
+    # filter retrieval (see retrieval/hybrid_search.py's `acl && :groups`
+    # predicate). "public" is always included; role adds at most one more group.
     groups = ["public", f"partner:{partner}"]
     if role == "principal":
         groups.append("role:principal")
@@ -68,6 +75,10 @@ def _visible_scores(results) -> list[dict]:
 
 
 def _check_permission_refusal(query: str, user_groups: list[str]) -> str | None:
+    # Simple substring match against each rule's keyword list -- if the query
+    # mentions a restricted topic AND the session lacks the required group,
+    # return a refusal message immediately. Returns None (no rule fired) to
+    # let the caller fall through to normal retrieval.
     lowered = query.lower()
     for rule in PERMISSION_RULES:
         if any(kw in lowered for kw in rule["keywords"]) and rule["required_group"] not in user_groups:
@@ -79,9 +90,15 @@ def _check_permission_refusal(query: str, user_groups: list[str]) -> str | None:
 
 
 def answer_query(query: str, role: str, partner: str) -> ChatResponse:
+    # This is the one function app/main.py calls per request. Three possible
+    # exit points, in order: permission refusal (no corpus access at all),
+    # confidence-gate abstain (retrieved but not confident enough), or a real
+    # generated answer -- each returns its own ChatResponse immediately.
     t_start = time.perf_counter()
     user_groups = _user_groups(role, partner)
 
+    # Exit 1: refuse before touching the corpus at all, if the query names a
+    # restricted category the session's role doesn't have.
     refusal = _check_permission_refusal(query, user_groups)
     if refusal:
         return ChatResponse(
@@ -93,6 +110,8 @@ def answer_query(query: str, role: str, partner: str) -> ChatResponse:
     with psycopg.connect(config.DATABASE_URL) as conn:
         result = retrieve(conn, query, user_groups)
 
+        # Exit 2: retrieval ran, but the confidence gate says nothing found is
+        # relevant enough to answer from -- skip the LLM call entirely.
         if result.gate.abstain:
             return ChatResponse(
                 query=query, role=role, partner=partner,
@@ -103,9 +122,13 @@ def answer_query(query: str, role: str, partner: str) -> ChatResponse:
                 timings_ms={**result.timings_ms, "total_ms": round((time.perf_counter() - t_start) * 1000, 1)},
             )
 
+        # Split the retrieved top-K into what the LLM may cite (public/ACL-
+        # visible content) vs. what it may only use silently (internal
+        # guidance docs like ADSK-BIZ-RULES.md) -- see llm/generate.py.
         citable = [r for r in result.top_k if not r.is_internal]
         internal = [r for r in result.top_k if r.is_internal]
 
+        # Exit 3: generate a real, cited answer.
         t0 = time.perf_counter()
         generated = generate_answer(query, citable, internal)
         result.timings_ms["generate_ms"] = round((time.perf_counter() - t0) * 1000, 1)
@@ -116,6 +139,9 @@ def answer_query(query: str, role: str, partner: str) -> ChatResponse:
         citations=generated.cited_chunk_ids,
         degraded_rerank=result.degraded_rerank,
         scores=_visible_scores(result.top_k),
-        internal_guidance_used=bool(internal),
+        # internal chunks are now *always* attached (see retrieval/pipeline.py),
+        # so their mere presence in `internal` no longer means anything -- this
+        # has to check whether they actually scored as relevant to this query.
+        internal_guidance_used=result.best_internal_score >= MIN_RERANK_SCORE,
         timings_ms={**result.timings_ms, "total_ms": round((time.perf_counter() - t_start) * 1000, 1)},
     )

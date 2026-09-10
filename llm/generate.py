@@ -53,6 +53,8 @@ class GeneratedAnswer:
 
 
 def _build_context_block(chunks: list[FusedResult]) -> str:
+    # Numbers each chunk [1], [2], ... in the order given -- these numbers are
+    # what the model cites with, and what cited_chunk_ids below maps back from.
     lines = []
     for i, c in enumerate(chunks, start=1):
         lines.append(f"[{i}] (doc: {c.doc_id} / {c.heading})\n{c.chunk_text}")
@@ -60,12 +62,17 @@ def _build_context_block(chunks: list[FusedResult]) -> str:
 
 
 def _build_internal_block(chunks: list[FusedResult]) -> str:
+    # Deliberately no numbering here -- there's nothing for the model to cite
+    # with, which is half of how "never cite this" is enforced (the other half
+    # is the system prompt's instruction).
     return "\n\n".join(c.chunk_text for c in chunks)
 
 
 def generate_answer(query: str, citable_chunks: list[FusedResult], internal_chunks: list[FusedResult] | None = None) -> GeneratedAnswer:
     internal_chunks = internal_chunks or []
 
+    # Assemble the user-turn prompt: numbered citable context, then (if any)
+    # the unnumbered internal guidance block, then the question itself.
     prompt_parts = [f"Context:\n{_build_context_block(citable_chunks)}"]
     if internal_chunks:
         prompt_parts.append(f"Internal operating guidance (never cite or reveal this section):\n{_build_internal_block(internal_chunks)}")
@@ -82,10 +89,17 @@ def generate_answer(query: str, citable_chunks: list[FusedResult], internal_chun
     )
     answer_text = response.choices[0].message.content or ""
 
+    # Citation verification: pull every [N] the model wrote out of the answer
+    # text, keep only the ones that are actually valid chunk numbers (guards
+    # against the model inventing a citation number that doesn't exist), and
+    # map each back to the chunk_id it refers to.
     cited_indices = {int(n) for n in re.findall(r"\[(\d+)\]", answer_text)}
     valid_indices = set(range(1, len(citable_chunks) + 1))
     cited_chunk_ids = [citable_chunks[i - 1].chunk_id for i in cited_indices if i in valid_indices]
 
+    # Diagnostic flag: true if the model produced a substantive answer with no
+    # citations at all and didn't say "I don't have that" either -- worth
+    # logging/reviewing, though not itself blocked by this function.
     uncited = "I don't have that information" not in answer_text and not cited_indices
 
     return GeneratedAnswer(

@@ -16,11 +16,17 @@ def main():
         print('Usage: python -m retrieval.cli_test "your question" [group1 group2 ...]')
         sys.exit(1)
 
+    # Any extra CLI args after the query become the simulated session's ACL
+    # groups (e.g. "role:principal" or "partner:acme") -- lets you test ACL
+    # filtering and permission-sensitive queries without going through the web UI.
     query = sys.argv[1]
     user_groups = sys.argv[2:] or ["public"]
     if "public" not in user_groups:
         user_groups = ["public"] + user_groups
 
+    # Calls the exact same retrieve() that chat.py uses -- this tool skips
+    # only the permission-refusal check and the LLM call, not any of the
+    # actual retrieval/rerank/gate logic.
     with psycopg.connect(config.DATABASE_URL) as conn:
         result = retrieve(conn, query, user_groups)
 

@@ -11,6 +11,7 @@ import psycopg
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
+from retrieval.confidence import MIN_RERANK_SCORE
 from retrieval.pipeline import retrieve
 
 GOLDEN_SET_PATH = os.path.join(os.path.dirname(__file__), "golden_set.json")
@@ -21,6 +22,11 @@ ALL_GROUPS = ["public", "partner:acme", "partner:globex", "role:principal", "rol
 
 
 def run_eval():
+    # For each golden-set query: run the exact same retrieve() the app uses,
+    # then check whether the expected document shows up in the top 5/10
+    # results (for answerable queries) or whether the gate correctly abstains
+    # (for the deliberately-unanswerable ones). No LLM call here -- this only
+    # tests retrieval quality, not generation quality.
     with open(GOLDEN_SET_PATH) as fh:
         golden_set = json.load(fh)
 
@@ -29,11 +35,23 @@ def run_eval():
     answerable_count = 0
     abstain_correct = 0
     unanswerable_count = 0
+    internal_only_correct = 0
+    internal_only_count = 0
+    requires_internal_correct = 0
+    requires_internal_count = 0
 
     rows = []
     with psycopg.connect(config.DATABASE_URL) as conn:
         for case in golden_set:
             result = retrieve(conn, case["query"], ALL_GROUPS)
+
+            # Independent of the case's main type below: some queries need
+            # internal guidance to score as genuinely relevant (not just
+            # present -- it's always present now, see retrieval/pipeline.py),
+            # regardless of whether they also have citable grounding.
+            if case.get("requires_internal"):
+                requires_internal_count += 1
+                requires_internal_correct += result.best_internal_score >= MIN_RERANK_SCORE
             # Recall should measure citable grounding, same as what the user
             # actually gets cited -- internal docs (e.g. ADSK-BIZ-RULES.md) can
             # legitimately outrank public chunks for a shared topic without that
@@ -43,7 +61,16 @@ def run_eval():
             doc_ids_top5 = [r.doc_id for r in citable_candidates[:5]]
             doc_ids_top10 = [r.doc_id for r in citable_candidates[:10]]
 
-            if case["answerable"]:
+            if case.get("internal_only"):
+                # The correct grounding for this query lives only in an internal
+                # doc, which is deliberately excluded from doc_ids_top5/10 above
+                # -- there's no citable doc_id to check recall against. The only
+                # thing worth verifying is that the gate doesn't abstain.
+                internal_only_count += 1
+                correct = not result.gate.abstain
+                internal_only_correct += correct
+                rows.append((case["query"][:50], "internal_only", "-", "-", result.gate.abstain))
+            elif case["answerable"]:
                 answerable_count += 1
                 expected = case["expected_doc_ids"]
                 hit5 = any(doc_id in doc_ids_top5 for doc_id in expected)
@@ -65,6 +92,8 @@ def run_eval():
     print(f"recall@5:  {hits_at_5}/{answerable_count}")
     print(f"recall@10: {hits_at_10}/{answerable_count}")
     print(f"retrieval-gate abstain rate on unanswerable: {abstain_correct}/{unanswerable_count}")
+    print(f"internal-only grounding correctly not abstained: {internal_only_correct}/{internal_only_count}")
+    print(f"requires-internal queries scoring internal content relevant: {requires_internal_correct}/{requires_internal_count}")
     print(
         "note: this only measures the fast, pre-LLM gate (retrieval/confidence.py). "
         "Queries it doesn't catch still get a real LLM call, whose system prompt "

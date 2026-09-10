@@ -5,19 +5,23 @@ from dataclasses import dataclass, field
 from ingest.pdf_loader import split_long_page
 
 
+# In-memory representation of one chunk, before it's embedded and written to
+# the `chunks` table. Both chunk_markdown and chunk_pdf build lists of these.
 @dataclass
 class Chunk:
-    chunk_id: str
-    doc_id: str
-    ordinal: int
-    heading: str
-    text: str
-    metadata: dict = field(default_factory=dict)
-    acl: list = field(default_factory=lambda: ["public"])
+    chunk_id: str      # stable hash-based id, see stable_chunk_id()
+    doc_id: str         # parent document's id, e.g. "buysell-pws-get-invoice-service-reference-manual"
+    ordinal: int        # this chunk's position within its document (0-indexed)
+    heading: str        # human-readable label shown in citations/UI, e.g. "Page 6" or a markdown heading
+    text: str            # the actual text that gets embedded and stored
+    metadata: dict = field(default_factory=dict)   # category/page/internal flags -- see chunk_pdf/chunk_markdown
+    acl: list = field(default_factory=lambda: ["public"])   # groups allowed to retrieve this chunk
 
 
 def _parse_frontmatter(raw: str) -> tuple[dict, str]:
     """Tiny frontmatter parser: `key: value` and `key: [a, b]` lines between --- fences."""
+    # Match the --- ... --- block at the top of the file; if there isn't one,
+    # treat the whole input as body with no frontmatter fields.
     match = re.match(r"^---\n(.*?)\n---\n(.*)$", raw, re.DOTALL)
     if not match:
         return {}, raw
@@ -28,6 +32,7 @@ def _parse_frontmatter(raw: str) -> tuple[dict, str]:
             continue
         key, _, value = line.partition(":")
         key, value = key.strip(), value.strip()
+        # "acl: [public, role:principal]" -> a Python list; anything else stays a plain string.
         if value.startswith("[") and value.endswith("]"):
             fm[key] = [v.strip() for v in value[1:-1].split(",") if v.strip()]
         else:
@@ -36,6 +41,9 @@ def _parse_frontmatter(raw: str) -> tuple[dict, str]:
 
 
 def stable_chunk_id(doc_id: str, heading: str, ordinal: int) -> str:
+    # Deterministic id: re-ingesting the same doc_id/heading/ordinal always
+    # produces the same chunk_id, so re-running ingestion on unchanged content
+    # doesn't create duplicate rows or churn foreign keys elsewhere.
     digest = hashlib.sha256(f"{doc_id}::{heading}::{ordinal}".encode()).hexdigest()
     return f"{doc_id}-{digest[:12]}"
 
@@ -59,6 +67,8 @@ def chunk_markdown(raw_text: str, fallback_doc_id: str) -> list[Chunk]:
         section = section.strip()
         if not section:
             continue
+        # Pull the heading text out of the section's first line (e.g. "## Downgrade" -> "Downgrade")
+        # for use as this chunk's human-readable label; fall back to the doc id if there's no heading.
         heading_match = re.match(r"^#{1,6}\s+(.*)", section)
         heading = heading_match.group(1).strip() if heading_match else fallback_doc_id
         chunk_id = stable_chunk_id(doc_id, heading, ordinal)
@@ -93,8 +103,13 @@ def chunk_pdf(pages: list[str], doc_id: str, acl: list[str], category: str = "",
     for page_num, page_text in enumerate(pages, start=1):
         if len(page_text) < 20:  # blank or image-only page -- nothing to retrieve
             continue
+        # Normally one piece (the whole page); split_long_page only returns
+        # more than one when the page's text exceeds MAX_CHUNK_CHARS.
         pieces = split_long_page(page_text)
         for piece_idx, piece in enumerate(pieces):
+            # Build a readable heading: page number, plus the page's first
+            # non-blank line as a rough label, plus a part marker if this page
+            # got split into multiple pieces.
             first_line = next((line.strip() for line in piece.splitlines() if line.strip()), "")
             heading = f"Page {page_num}"
             if first_line:
@@ -102,6 +117,9 @@ def chunk_pdf(pages: list[str], doc_id: str, acl: list[str], category: str = "",
             if len(pieces) > 1:
                 heading += f" (part {piece_idx + 1}/{len(pieces)})"
             chunk_id = stable_chunk_id(doc_id, f"p{page_num}-{piece_idx}", ordinal)
+            # The doc-title prefix (see the docstring above) is prepended to the
+            # stored/embedded text here, after splitting -- so it doesn't count
+            # against MAX_CHUNK_CHARS and doesn't affect where a page gets split.
             text = f"[{doc_title}]\n\n{piece}" if doc_title else piece
             chunks.append(
                 Chunk(

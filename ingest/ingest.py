@@ -25,14 +25,24 @@ EMBED_BATCH_SIZE = 32
 
 
 def _vector_literal(values: list[float]) -> str:
+    # psycopg has no native Python type for pgvector's `vector` column, so we
+    # format the embedding as the literal text pgvector expects ("[0.1,0.2,...]")
+    # and let the SQL cast it with `::vector` at insert time.
     return "[" + ",".join(repr(v) for v in values) + "]"
 
 
 def _content_hash_bytes(raw: bytes) -> str:
+    # Hashing raw bytes (not extracted text) means a byte-identical file is
+    # always detected as unchanged, regardless of file type -- one hash function
+    # works for both PDFs and markdown.
+    # SJ - this checks the entire document at once, beofre chunking. 
+    #This is how program knows if this is a new doc or existing document
     return hashlib.sha256(raw).hexdigest()
 
 
 def _slugify(name: str) -> str:
+    # Turns a filename into a safe primary key for the `documents`/`chunks`
+    # tables, e.g. "BuySell-pws-get-invoice-....pdf" -> "buysell-pws-get-invoice-...".
     slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
     return slug
 
@@ -110,6 +120,9 @@ def _doc_title(filename: str) -> str:
 
 
 def _embed_in_batches(texts: list[str]) -> list[list[float]]:
+    # OpenRouter (like most embedding APIs) has a per-request size limit, and a
+    # 123-page PDF can produce well over 100 chunks -- batch instead of sending
+    # everything in one call.
     embeddings = []
     for i in range(0, len(texts), EMBED_BATCH_SIZE):
         embeddings.extend(embed_texts(texts[i : i + EMBED_BATCH_SIZE]))
@@ -117,6 +130,9 @@ def _embed_in_batches(texts: list[str]) -> list[list[float]]:
 
 
 def _load_chunks(path: str, filename: str, fallback_doc_id: str) -> list[Chunk]:
+    # Dispatches to the right chunker by extension. Markdown carries its own
+    # doc_id/acl/category/internal via frontmatter; PDFs get theirs assigned
+    # here from the filename convention, since a PDF has no frontmatter to read.
     if filename.endswith(".md"):
         with open(path, encoding="utf-8") as fh:
             raw = fh.read()
@@ -131,6 +147,10 @@ def _load_chunks(path: str, filename: str, fallback_doc_id: str) -> list[Chunk]:
 
 
 def ingest_corpus(corpus_dir: str = config.CORPUS_DIR) -> None:
+    # One document at a time, each in its own transaction: hash-check -> skip
+    # or (chunk -> embed -> delete old rows -> insert new rows) -> commit. A
+    # failure partway through one document never leaves a half-updated doc
+    # committed, and never blocks the rest of the corpus from ingesting.
     filenames = sorted(f for f in os.listdir(corpus_dir) if f.endswith((".md", ".pdf")))
     with psycopg.connect(config.DATABASE_URL, autocommit=False) as conn:
         for filename in filenames:
@@ -140,6 +160,9 @@ def ingest_corpus(corpus_dir: str = config.CORPUS_DIR) -> None:
             fallback_doc_id = _slugify(os.path.splitext(filename)[0])
             content_hash = _content_hash_bytes(raw_bytes)
 
+            # Skip check: compare this file's hash against what's already
+            # recorded for this doc_id. Nothing below runs (no chunking, no
+            # embedding API calls, no writes) if the file hasn't changed.
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT content_hash FROM documents WHERE doc_id = %s",
@@ -151,12 +174,15 @@ def ingest_corpus(corpus_dir: str = config.CORPUS_DIR) -> None:
                 print(f"skip  (unchanged): {fallback_doc_id}")
                 continue
 
+            # New or changed file: chunk it, then embed every chunk's text.
             chunks = _load_chunks(path, filename, fallback_doc_id)
             if not chunks:
                 print(f"warn  (no extractable text): {fallback_doc_id}")
                 continue
             embeddings = _embed_in_batches([c.text for c in chunks])
 
+            # Write phase: replace this doc's chunks atomically and record its
+            # new hash, all in one transaction (committed below).
             with conn.cursor() as cur:
                 # Delete first so a changed doc's stale chunks never linger in either index.
                 cur.execute("DELETE FROM chunks WHERE doc_id = %s", (fallback_doc_id,))

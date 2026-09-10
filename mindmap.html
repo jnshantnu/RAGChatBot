@@ -1,4 +1,4 @@
-<title>RAG Pipeline Schematic</title>
+<title>RAG Pipeline Schematic-MIndMap</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;0,600;0,700;1,500&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
@@ -158,6 +158,35 @@
   }
   .panel h3 { margin-bottom: 0.6rem; }
   .panel .file { font-family: var(--font-mono); font-size: 0.72rem; color: var(--accent); }
+
+  /* ---------- file-map lanes ---------- */
+  .filemap-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1rem;
+    margin-top: 1.3rem;
+  }
+  .filemap-grid.row-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .filemap-grid.row-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  @media (max-width: 900px) {
+    .filemap-grid.row-5, .filemap-grid.row-2 { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+  }
+  .filemap-col {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 1.1rem 1.3rem;
+  }
+  .filemap-col h3 {
+    padding-bottom: 0.6rem;
+    margin-bottom: 0.8rem;
+    border-bottom: 2px solid var(--accent);
+  }
+  .filemap-col ul { list-style: none; margin: 0; padding: 0; }
+  .filemap-col li { margin-bottom: 0.75rem; }
+  .filemap-col li:last-child { margin-bottom: 0; }
+  .filemap-col .path { display: block; font-family: var(--font-mono); font-size: 0.78rem; color: var(--accent); word-break: break-all; }
+  .filemap-col .desc { display: block; font-size: 0.82rem; color: var(--ink-soft); margin-top: 0.15rem; }
   .code-block {
     background: var(--paper);
     border: 1px solid var(--line-soft);
@@ -228,7 +257,8 @@
     </div>
     <dl class="meta-grid">
       <dt>Store</dt><dd>Postgres 14 + pgvector 0.8</dd>
-      <dt>Corpus</dt><dd>18 Autodesk PWS PDFs / 838 chunks</dd>
+      <dt>Corpus</dt><dd>21 docs / 1,025 chunks</dd>
+      <dt>ACL mix</dt><dd>903 public, 122 distributor-only, 5 internal</dd>
       <dt>Embed</dt><dd>Qwen3-Embedding-8B (1536d)</dd>
       <dt>Rerank</dt><dd>cross-encoder/ms-marco-MiniLM-L-6</dd>
       <dt>Serve</dt><dd>FastAPI + static UI</dd>
@@ -240,6 +270,90 @@
     <span class="item"><span class="stamp simplified"></span> simplified vs. case study</span>
     <span class="item"><span class="stamp todo"></span> deliberately not implemented</span>
   </div>
+
+  <!-- ========================= FILE MAP ========================= -->
+  <section>
+    <div class="section-head">
+      <h2>Project file map</h2>
+    </div>
+    <p>Which file does what, grouped by component. The <code>§NN</code> tags are section numbers further down this same document. Not every section gets its own column here: §04 and §05 are bug/lesson narratives, not separate components — their files (<code>retrieval/confidence.py</code> for §04, <code>ingest/chunker.py</code>/<code>ingest/ingest.py</code> for §05) already live in the Retriever internals and Ingestion columns below, tagged inline rather than repeated in a column of their own.</p>
+
+    <div class="filemap-grid row-5">
+      <div class="filemap-col">
+        <h3>Ingestion pipeline <span style="color:var(--ink-soft); font-weight:400; font-size:0.8rem;">(§01)</span></h3>
+        <ul>
+          <li><span class="path">ingest/ingest.py</span><span class="desc">Orchestrator (<code>python -m ingest.ingest</code>). Content-hash skip logic, PDF/markdown routing, ACL + category assignment, batched embed calls, upsert. <code>_doc_title()</code> here is §05's fix.</span></li>
+          <li><span class="path">ingest/pdf_loader.py</span><span class="desc">Raw PDF text extraction per page; splits an overlong page into pieces.</span></li>
+          <li><span class="path">ingest/chunker.py</span><span class="desc"><code>chunk_pdf</code> (per-page + doc-title prefix, §05) and <code>chunk_markdown</code> (heading split + frontmatter: doc_id/acl/internal).</span></li>
+          <li><span class="path">ingest/embed.py</span><span class="desc">OpenRouter embeddings client — <code>embed_texts()</code> for documents, <code>embed_query()</code> adds the query instruction prefix.</span></li>
+          <li><span class="path">db/schema.sql</span><span class="desc">Defines <code>chunks</code> (+ GIN/HNSW indexes) and the <code>documents</code> registry ingestion reads/writes.</span></li>
+          <li><span class="path">config.py</span><span class="desc">Shared config: DATABASE_URL, CORPUS_DIR, embedding model/dim — read by ingestion and query pipeline alike.</span></li>
+        </ul>
+      </div>
+
+      <div class="filemap-col">
+        <h3>Query pipeline <span style="color:var(--ink-soft); font-weight:400; font-size:0.8rem;">(§02)</span></h3>
+        <ul>
+          <li><span class="path">chat.py</span><span class="desc">Per-request orchestrator: user groups, pre-retrieval permission refusal, ties retrieval + generation together.</span></li>
+          <li><span class="path">retrieval/pipeline.py</span><span class="desc"><code>retrieve()</code> — the glue: embed query → hybrid search → RRF → rerank → gate. Calls into the Retriever internals column.</span></li>
+          <li><span class="path">llm/generate.py</span><span class="desc">Context assembly (citable + internal blocks, §06), LLM call, citation verification.</span></li>
+          <li><span class="path">app/main.py</span><span class="desc">FastAPI app — the <code>/chat</code> endpoint and request logging.</span></li>
+          <li><span class="path">app/static/index.html</span><span class="desc">The web chat UI.</span></li>
+        </ul>
+      </div>
+
+      <div class="filemap-col">
+        <h3>Retriever internals <span style="color:var(--ink-soft); font-weight:400; font-size:0.8rem;">(§03)</span></h3>
+        <ul>
+          <li><span class="path">retrieval/hybrid_search.py</span><span class="desc">The two SQL arms — keyword (GIN/<code>ts_rank_cd</code>) and semantic (HNSW/cosine) — both with the ACL predicate.</span></li>
+          <li><span class="path">retrieval/rrf.py</span><span class="desc">Reciprocal Rank Fusion; the <code>FusedResult</code> dataclass (incl. <code>is_internal</code>).</span></li>
+          <li><span class="path">retrieval/rerank.py</span><span class="desc">Cross-encoder reranking of the top ~20 fused candidates (§04).</span></li>
+          <li><span class="path">retrieval/confidence.py</span><span class="desc">The abstain gate — reads the rerank score, falls back to raw similarity only if reranking fails. This file <em>is</em> §04's story (two rounds of the gate breaking, twice fixed).</span></li>
+          <li><span class="path">retrieval/cli_test.py</span><span class="desc">Dev-only inspector — runs this whole column with no LLM call, shows internal-flagged chunks the UI hides.</span></li>
+        </ul>
+      </div>
+
+      <div class="filemap-col">
+        <h3>Hidden guidance &amp; real ACL <span style="color:var(--ink-soft); font-weight:400; font-size:0.8rem;">(§06–07)</span></h3>
+        <ul>
+          <li><span class="path">RAG-KB-Documents/ADSK-BIZ-RULES.md</span><span class="desc">The internal content itself — business-model rules and distributor/reseller API access rules.</span></li>
+          <li><span class="path">chat.py</span><span class="desc"><code>PERMISSION_RULES</code> (pre-retrieval refusal), score-stripping, the non-revealing <code>internal_guidance_used</code> flag.</span></li>
+          <li><span class="path">llm/generate.py</span><span class="desc">Splits the prompt into a numbered citable block and an unnumbered, never-cited internal block.</span></li>
+          <li><span class="path">ingest/ingest.py</span><span class="desc"><code>_DISTRIBUTOR_ONLY_FILES</code> — the document-level ACL boundary for GetMyPrice/PlaceOrderV2.</span></li>
+        </ul>
+      </div>
+
+      <div class="filemap-col">
+        <h3>Eval loop <span style="color:var(--ink-soft); font-weight:400; font-size:0.8rem;">(§08)</span></h3>
+        <ul>
+          <li><span class="path">eval/golden_set.json</span><span class="desc">16 labelled queries (12 answerable, 4 deliberately not) with expected doc IDs.</span></li>
+          <li><span class="path">eval/run_eval.py</span><span class="desc">Recall@5/@10 + retrieval-gate abstain-rate harness (<code>python -m eval.run_eval</code>).</span></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="filemap-grid row-2" style="margin-top: 1rem;">
+      <div class="filemap-col">
+        <h3>Knowledge base <span style="color:var(--ink-soft); font-weight:400; font-size:0.8rem;">(data, not code)</span></h3>
+        <ul>
+          <li><span class="path">RAG-KB-Documents/*.pdf</span><span class="desc">20 real Autodesk Partner WebServices manuals — the actual ingested corpus.</span></li>
+          <li><span class="path">RAG-KB-Documents/ADSK-BIZ-RULES.md</span><span class="desc">The hidden internal-guidance doc (§06) — <code>internal: true</code> frontmatter.</span></li>
+          <li><span class="path">RAG-KB-Documents/*.pptx, *.xlsm</span><span class="desc">Present but NOT ingested — decks and the pricelist, see §09.</span></li>
+          <li><span class="path">corpus/*.md</span><span class="desc">Original synthetic demo corpus (7 files) from early development — <code>CORPUS_DIR</code> no longer points here, kept for reference only.</span></li>
+        </ul>
+      </div>
+
+      <div class="filemap-col">
+        <h3>Project &amp; config</h3>
+        <ul>
+          <li><span class="path">README.md</span><span class="desc">Setup, run commands, and the documented findings/bugs from this build.</span></li>
+          <li><span class="path">requirements.txt</span><span class="desc">Python dependencies (psycopg, openai SDK, FastAPI, sentence-transformers, ...).</span></li>
+          <li><span class="path">.env / .env.example</span><span class="desc">DATABASE_URL, OPENROUTER_API_KEY, model config — <code>.env</code> is gitignored, never committed.</span></li>
+          <li><span class="path">logs/requests.jsonl</span><span class="desc">Lightweight observability — one JSON line per request (§09: simplified vs. OpenTelemetry/Langfuse).</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
 
   <!-- ========================= INGESTION ========================= -->
   <section>
@@ -269,8 +383,8 @@
           <g>
             <rect x="10" y="30" width="140" height="60" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
             <circle cx="140" cy="40" r="5" fill="var(--accent)"/>
-            <text x="80" y="55" text-anchor="middle" font-weight="600">PWS PDFs</text>
-            <text x="80" y="72" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">18 docs, all public</text>
+            <text x="80" y="55" text-anchor="middle" font-weight="600">PWS PDFs + rules.md</text>
+            <text x="80" y="72" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">21 docs, mixed ACL (§07)</text>
           </g>
           <g>
             <rect x="196" y="30" width="150" height="60" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
@@ -375,7 +489,7 @@
           <rect x="930" y="40" width="140" height="64" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
           <circle cx="1060" cy="50" r="5" fill="var(--accent)"/>
           <text x="1000" y="60" text-anchor="middle" font-weight="600">Confidence gate</text>
-          <text x="1000" y="76" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">rerank score ≥ 0.30</text>
+          <text x="1000" y="76" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">rerank score ≥ 0.20*</text>
           <text x="1000" y="90" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">→ continue</text>
 
           <!-- 6 LLM -->
@@ -392,11 +506,11 @@
           <!-- Branch B box -->
           <rect x="930" y="180" width="240" height="66" rx="3" fill="var(--warn-soft)" stroke="var(--warn)" stroke-width="1.5"/>
           <text x="1050" y="202" text-anchor="middle" font-weight="600" fill="var(--warn)">Abstain</text>
-          <text x="1050" y="219" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">rerank score &lt; 0.30</text>
+          <text x="1050" y="219" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">rerank score &lt; 0.20*</text>
           <text x="1050" y="233" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">"I don't have that." — no LLM call</text>
         </g>
       </svg>
-      <figcaption>Both off-ramps produce a real, valid answer — a refusal or an abstain — rather than letting an unanswerable or unauthorized question reach generation. The rerank step (§04) is what makes the gate's threshold trustworthy.</figcaption>
+      <figcaption>Both off-ramps produce a real, valid answer — a refusal or an abstain — rather than letting an unanswerable or unauthorized question reach generation. The rerank step (§04) is what makes the gate's threshold trustworthy. *Plus a dominance-rescue exception below 0.20 — see §04.</figcaption>
     </figure>
   </section>
 
@@ -409,6 +523,14 @@
     <p>One <code>chunks</code> table, two index arms, one round trip each. The permission filter runs as a predicate inside both index scans, not as a step afterward.</p>
 
     <div class="panel-grid">
+      <div class="panel">
+        <h3>tsv &amp; embedding — parallel, not sequential</h3>
+        <p class="file">db/schema.sql</p>
+        <div class="code-block">tsv tsvector GENERATED ALWAYS AS
+  (to_tsvector('english', chunk_text)) STORED
+embedding vector(1536)</div>
+        <p style="margin-top:0.6rem; max-width:none;">Both are derived straight from <code>chunk_text</code>, independently — neither reads the other. <code>tsv</code> is a generated column: Postgres computes it itself, instantly, the moment a row is written, no application code involved. <code>embedding</code> is the opposite kind of work: <code>ingest/embed.py</code> sends the text to an external model over the network and gets a 1536-number vector back, <em>before</em> the row is even inserted. One is free and automatic; the other is a paid API call — that asymmetry is why ingestion batches embedding calls (§01) but never has to think about <code>tsv</code> at all.</p>
+      </div>
       <div class="panel">
         <h3>ACL predicate</h3>
         <p class="file">retrieval/hybrid_search.py</p>
@@ -436,7 +558,7 @@ rewritten to 'a' | 'b' | 'c'</div>
   <section>
     <div class="section-head">
       <span class="section-num">04</span>
-      <h2>What broke the confidence gate — twice</h2>
+      <h2>What broke the confidence gate — three times</h2>
     </div>
     <p>The case study's gate reads post-<em>rerank</em> scores. This POC didn't have one at first (§02 marked it TODO), which forced the gate onto weaker signals — and each one broke in its own way as the system evolved.</p>
 
@@ -466,6 +588,12 @@ rewritten to 'a' | 'b' | 'c'</div>
       <h3>A later fix moved that Salesforce score — on purpose, with a trade-off</h3>
       <p>After §05's doc-title prefix was added, the Salesforce query's gate score rose from 0.10 to 0.46 — high enough to now pass the gate — because the prefixed title text made the whole "Place Order API" document read as more generally API/integration-relevant, the same effect that correctly fixed §05's bug. The query still gets the right final answer, but now via the LLM's grounding refusal (the second defense layer) rather than the gate catching it outright. A concrete, measured example of the recall/precision trade-off eval loops exist to catch — <code>eval/run_eval.py</code> only checks the gate layer, so this kind of shift is exactly what its "note" at the bottom is warning you to check by hand.</p>
     </div>
+
+    <div class="callout" style="background:var(--restrict-soft); border-color:var(--restrict); margin-top:1rem;">
+      <h3>Round 3 — vague phrasing under-scores a genuinely correct match</h3>
+      <p>Two real user questions retrieved the exactly right chunk at rank 1, yet scored too low to pass the 0.30 bar: "which APIs are available to me?" (0.2330, correct chunk in <code>buysell-pws-place-order-api-implementation-guide</code>) and "which business model is applicable to me? I am in Indonesia" (0.0311, correct grounding entirely in the internal <code>ADSK-BIZ-RULES.md</code>). The cross-encoder reads conversational, generic phrasing as less confident than technical phrasing, even when it found the right answer. A genuinely unanswerable query ("Does the API support GraphQL?") scored 0.0017 by comparison — nowhere near either real case.</p>
+      <p class="sub">Fix, in two parts: lowered <code>MIN_RERANK_SCORE</code> 0.30 → 0.20 (rescues the first case; verified safe against both known-correct abstains). Added a <strong>dominance rescue</strong> below even that: a result clearing a low floor (0.01) <em>and</em> beating the runner-up by 10x or more is trusted regardless of absolute score — a real match buried by vague phrasing still stands out sharply from the noise around it (Indonesia: 0.0311 vs. 0.0001 runner-up, ~300x), while genuine noise stays clustered close together (GraphQL: 0.0017 vs. 0.0004, ~4x). Both new queries are permanent regression cases in <code>eval/golden_set.json</code>.</p>
+    </div>
   </section>
 
   <!-- ========================= CHUNK IDENTITY LOSS ========================= -->
@@ -483,21 +611,89 @@ rewritten to 'a' | 'b' | 'c'</div>
     </div>
   </section>
 
-  <!-- ========================= EVAL RESULTS ========================= -->
+  <!-- ========================= HIDDEN INTERNAL GUIDANCE ========================= -->
   <section>
     <div class="section-head">
       <span class="section-num">06</span>
+      <h2>A layer with no equivalent in the case study: hidden operating guidance</h2>
+    </div>
+    <p>Some content needs to shape an answer's <em>content</em> without ever being citable or visible — business rules the system operates by, not knowledge it shows sources for. <code>ADSK-BIZ-RULES.md</code> (5 chunks) is tagged <code>internal: true</code> and is the first real case of this.</p>
+
+    <div class="panel-grid">
+      <div class="panel">
+        <h3>Embedded and retrieved normally</h3>
+        <p class="file">ingest/chunker.py</p>
+        <p style="margin-top:0.6rem; max-width:none;">An internal doc competes in the same hybrid search + rerank pipeline as everything else — it can win top rank (0.99+ scores measured) when genuinely relevant. Hiding it isn't a retrieval-time filter; it's a generation-time and API-time wall.</p>
+      </div>
+      <div class="panel">
+        <h3>Two prompt blocks, one numbered</h3>
+        <p class="file">llm/generate.py</p>
+        <p style="margin-top:0.6rem; max-width:none;">Citable chunks get <code>[1]</code>-style numbers the model can cite. Internal chunks go in a separate, unnumbered "Internal operating guidance" block the model is told to use but never reveal, quote, or cite — there's no bracket number to leak.</p>
+      </div>
+      <div class="panel">
+        <h3>Stripped before it leaves the server</h3>
+        <p class="file">chat.py</p>
+        <p style="margin-top:0.6rem; max-width:none;">Every score/debug field is filtered by <code>is_internal</code> before the API response is built — not just the citation list. A non-revealing <code>internal_guidance_used</code> boolean is the only trace exposed, confirming it fired without saying what it said.</p>
+      </div>
+    </div>
+
+    <div class="callout" style="background:var(--warn-soft); border-color:var(--warn);">
+      <h3>First version leaked nothing — by refusing to answer at all</h3>
+      <p>The initial system prompt said "answer ONLY using the numbered context chunks." The model took that literally: asked "why doesn't Buy Sell have quote APIs" — a fact that exists only in the internal guidance — it replied "I don't have that information," even with the correct answer sitting in its own context. The instruction to stay silent about internal guidance had accidentally also made it unusable as a source.</p>
+      <p class="sub">Fixed by explicitly stating internal guidance is a valid, never-cited basis for a claim. Same question then answered correctly, with zero citations and zero exposure.</p>
+    </div>
+  </section>
+
+  <!-- ========================= REAL ACL ========================= -->
+  <section>
+    <div class="section-head">
+      <span class="section-num">07</span>
+      <h2>ACL enforcement, upgraded from narrative to real</h2>
+    </div>
+    <p>Per <code>ADSK-BIZ-RULES.md</code>: only Distributors can place orders to Autodesk in the Buy-Sell model — Resellers cannot. That's now enforced at the SQL predicate, not just mentioned in prose.</p>
+
+    <div class="panel-grid">
+      <div class="panel">
+        <h3>Document-level ACL boundary</h3>
+        <p class="file">ingest/ingest.py</p>
+        <div class="code-block">GetMyPrice manual, PlaceOrderV2 manual
+  → acl: [role:distributor]
+122 chunks, 2 docs</div>
+        <p style="margin-top:0.6rem; max-width:none;">These two manuals are entirely dedicated to the restricted APIs. The general implementation guide (mixed content covering all 5 Buy-Sell APIs) stays public — page-level chunking can't cleanly split API-specific access within a shared overview page.</p>
+      </div>
+      <div class="panel">
+        <h3>Pre-retrieval refusal, same shape as commission</h3>
+        <p class="file">chat.py: PERMISSION_RULES</p>
+        <p style="margin-top:0.6rem; max-width:none;">Asking about PlaceOrderV2/GetMyPrice as a reseller is refused before retrieval runs at all — identical pattern to the principal-only commission rule, now with two independent entries instead of one.</p>
+      </div>
+      <div class="panel">
+        <h3>"Available to me" means actually available</h3>
+        <p class="file">llm/generate.py: SYSTEM_PROMPT</p>
+        <p style="margin-top:0.6rem; max-width:none;">A reseller asking "what APIs are available to me" now gets a list containing only what they can use — restricted items are omitted entirely, not listed-then-caveated.</p>
+      </div>
+    </div>
+
+    <div class="callout" style="background:var(--restrict-soft); border-color:var(--restrict);">
+      <h3>Found while testing: refusal text was hardcoded to the wrong rule</h3>
+      <p>The first version's refusal message always said "restricted to principal-level users" — copy-pasted boilerplate, regardless of which <code>PERMISSION_RULES</code> entry actually matched. A reseller asking about PlaceOrderV2 got told it was a <em>principal</em> restriction, which is simply false. Fixed by adding a <code>restriction_label</code> per rule instead of one hardcoded string.</p>
+    </div>
+  </section>
+
+  <!-- ========================= EVAL RESULTS ========================= -->
+  <section>
+    <div class="section-head">
+      <span class="section-num">08</span>
       <h2>Eval loop</h2>
     </div>
-    <p>16-query golden set against the real corpus (12 answerable, 4 deliberately not) run via <code>python -m eval.run_eval</code>. Two-layer defense against the unanswerable ones: the fast retrieval gate catches clear misses before an LLM call; the LLM's own grounding instruction catches the subtler content gaps the gate lets through.</p>
+    <p>18-query golden set against the real corpus (13 answerable + 1 internal-only, 4 deliberately not) run via <code>python -m eval.run_eval</code>. Two-layer defense against the unanswerable ones: the fast retrieval gate catches clear misses before an LLM call; the LLM's own grounding instruction catches the subtler content gaps the gate lets through.</p>
 
     <div class="stat-row">
       <div class="stat accent">
-        <div class="figure">12<span class="of">/12</span></div>
+        <div class="figure">13<span class="of">/13</span></div>
         <div class="label">recall@5</div>
       </div>
       <div class="stat accent">
-        <div class="figure">12<span class="of">/12</span></div>
+        <div class="figure">13<span class="of">/13</span></div>
         <div class="label">recall@10</div>
       </div>
       <div class="stat warn">
@@ -514,20 +710,22 @@ rewritten to 'a' | 'b' | 'c'</div>
   <!-- ========================= SIMPLIFICATIONS ========================= -->
   <section>
     <div class="section-head">
-      <span class="section-num">07</span>
+      <span class="section-num">09</span>
       <h2>Simplified vs. the case study</h2>
     </div>
     <table>
       <thead><tr><th>Component</th><th>Case study</th><th>This POC</th></tr></thead>
       <tbody>
+        <tr><td>Postgres version</td><td>Postgres 18</td><td><span class="stamp simplified" style="vertical-align:-1px;"></span> Postgres 14.24 — Ubuntu 22.04's default apt repo only offers 14; getting 18 needs the PGDG apt repo instead. pgvector 0.8.0 either way; nothing in this build depends on 18-specific features.</td></tr>
         <tr><td>Rerank</td><td>Cohere / BGE cross-encoder</td><td><span class="stamp built" style="vertical-align:-1px;"></span> built — <code>ms-marco-MiniLM-L-6-v2</code>, see §04</td></tr>
         <tr><td>Confidence gate</td><td>reads post-rerank scores</td><td><span class="stamp built" style="vertical-align:-1px;"></span> built — reads rerank score directly; raw-similarity path kept only as documented fallback</td></tr>
-        <tr><td>ACL enforcement</td><td>partner/principal restricted data</td><td><span class="stamp simplified" style="vertical-align:-1px;"></span> mechanism built &amp; tested, but live KB is currently all-public — dormant until the pricelist is ingested (see README)</td></tr>
+        <tr><td>ACL enforcement</td><td>partner/principal restricted data</td><td><span class="stamp built" style="vertical-align:-1px;"></span> built &amp; active — role:distributor restricts 122 chunks/2 docs at the SQL level, see §07</td></tr>
+        <tr><td>Hidden operating guidance</td><td>n/a (goes beyond the case study)</td><td><span class="stamp built" style="vertical-align:-1px;"></span> built — see §06</td></tr>
         <tr><td>Query rewriter</td><td>conditional rewrite step</td><td><span class="stamp todo" style="vertical-align:-1px;"></span> query goes straight to embedding</td></tr>
         <tr><td>Reindexing</td><td>blue/green + alias flip</td><td><span class="stamp todo" style="vertical-align:-1px;"></span> ingestion re-embeds in place</td></tr>
         <tr><td>Observability</td><td>OpenTelemetry → Langfuse</td><td><span class="stamp simplified" style="vertical-align:-1px;"></span> one JSON line/request in <code>logs/requests.jsonl</code></td></tr>
         <tr><td>Cache lookup</td><td>query+version+permission key</td><td><span class="stamp todo" style="vertical-align:-1px;"></span> not implemented</td></tr>
-        <tr><td>Spreadsheet/deck ingestion</td><td>n/a (this KB's own gap)</td><td><span class="stamp todo" style="vertical-align:-1px;"></span> PDFs only — pricelist (.xlsm) and decks (.pptx) not ingested</td></tr>
+        <tr><td>Spreadsheet/deck ingestion</td><td>n/a (this KB's own gap)</td><td><span class="stamp todo" style="vertical-align:-1px;"></span> PDFs + markdown only — pricelist (.xlsm) and decks (.pptx) not ingested</td></tr>
       </tbody>
     </table>
   </section>
