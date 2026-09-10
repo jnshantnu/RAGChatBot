@@ -31,6 +31,12 @@ def _warm_reranker():
 _warm_reranker()
 
 st.title("Partner AI Chat Bot")
+st.info(
+    "**Demo only.** Built on publicly available Autodesk Partner WebServices "
+    "reference documentation. Not an official Autodesk product; not affiliated "
+    "with or endorsed by Autodesk.",
+    icon="ℹ️",
+)
 
 with st.sidebar:
     st.header("Session")
