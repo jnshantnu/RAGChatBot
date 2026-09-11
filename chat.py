@@ -23,6 +23,7 @@ import config
 from llm.generate import generate_answer
 from retrieval.pipeline import retrieve
 from retrieval.query_rewrite import rewrite_query
+from retrieval.trace import TraceStep
 
 # Keyword-triggered intent check for principal-only categories. A real system
 # would use a small classifier or the query rewriter; a keyword match is
@@ -60,6 +61,7 @@ class ChatResponse:
     timings_ms: dict = field(default_factory=dict)
     rewritten_query: str | None = None  # set only when query_rewrite.py actually changed something
     rewrite_rules_applied: list[str] = field(default_factory=list)
+    trace: list[TraceStep] = field(default_factory=list)  # debug-mode flowchart data, see retrieval/trace.py
 
 
 def _user_groups(role: str, partner: str) -> list[str]:
@@ -117,8 +119,14 @@ def answer_query(query: str, role: str, partner: str) -> ChatResponse:
     # normalization, or bare-term expansion, whichever rule's trigger
     # matches. A no-op for queries that don't match any trigger -- retrieval
     # and generation below just get the original query text back unchanged.
+    t0 = time.perf_counter()
     rewrite = rewrite_query(query, role)
     retrieval_query = rewrite.rewritten_query
+    rewrite_trace = TraceStep(
+        name="Query Rewrite", inputs={"query": query, "role": role},
+        outputs={"rewritten_query": retrieval_query, "rules_applied": rewrite.rules_applied},
+        timing_ms=round((time.perf_counter() - t0) * 1000, 1),
+    )
 
     with psycopg.connect(config.DATABASE_URL) as conn:
         result = retrieve(conn, retrieval_query, user_groups)
@@ -134,6 +142,7 @@ def answer_query(query: str, role: str, partner: str) -> ChatResponse:
                 scores=_visible_scores(result.candidates),
                 rewritten_query=rewrite.rewritten_query if rewrite.changed else None,
                 rewrite_rules_applied=rewrite.rules_applied,
+                trace=[rewrite_trace, *result.trace],
                 timings_ms={**result.timings_ms, "total_ms": round((time.perf_counter() - t_start) * 1000, 1)},
             )
 
@@ -144,7 +153,19 @@ def answer_query(query: str, role: str, partner: str) -> ChatResponse:
         # model can resolve "me" even when the rewriter's triggers didn't fire.
         t0 = time.perf_counter()
         generated = generate_answer(retrieval_query, result.top_k, role)
-        result.timings_ms["generate_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+        t_generate = round((time.perf_counter() - t0) * 1000, 1)
+        result.timings_ms["generate_ms"] = t_generate
+        generate_trace = TraceStep(
+            name="Generate Answer",
+            inputs={"role": role, "chunks_in_context": len(result.top_k)},
+            outputs={
+                "answer_chars": len(generated.answer),
+                "citations": generated.cited_chunk_ids,
+                "uncited_claims_flagged": generated.uncited_claims_flagged,
+            },
+            timing_ms=t_generate,
+            detail={"answer": generated.answer},
+        )
 
     return ChatResponse(
         query=query, role=role, partner=partner,
@@ -154,5 +175,6 @@ def answer_query(query: str, role: str, partner: str) -> ChatResponse:
         scores=_visible_scores(result.top_k),
         rewritten_query=rewrite.rewritten_query if rewrite.changed else None,
         rewrite_rules_applied=rewrite.rules_applied,
+        trace=[rewrite_trace, *result.trace, generate_trace],
         timings_ms={**result.timings_ms, "total_ms": round((time.perf_counter() - t_start) * 1000, 1)},
     )
