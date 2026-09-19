@@ -49,7 +49,19 @@ from retrieval.rerank import DEFAULT_MAX_LENGTH, RERANK_CANDIDATES, TUNED_MAX_LE
 from retrieval.rrf import FusedResult, reciprocal_rank_fusion
 from retrieval.trace import TraceStep, sort_trace, summarize_candidates
 
-TOP_K = 5
+# How many competitive (non-guaranteed) chunks reach the LLM, out of the 20
+# the reranker scores. Widened from 5 after finding the fifth slot was
+# sometimes the only thing standing between the LLM and content it needed --
+# e.g. "give me sample code to authenticate ... in java": once the reranker
+# was ranking correctly (see retrieval/rerank.py and query_rewrite.py's
+# _strip_code_request), the real endpoint/signature mechanics (score 0.29,
+# 0.25) still didn't make a TOP_K=5 cut dominated by higher-scoring overview/
+# pointer pages (0.92-0.99) -- at TOP_K=8 they did, and the model produced a
+# real, cited implementation instead of refusing. Checked against a plain
+# informational query too (no dilution: same two guaranteed-doc citations,
+# same concise answer) -- the extra headroom only matters when the top few
+# chunks alone aren't enough, which is exactly when it should matter.
+TOP_K = 8
 
 logger = logging.getLogger(__name__)
 

@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Partner AI Chat Bot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<button id="sidebarToggle" aria-label="Toggle session panel">&#9776;</button>
+
+<aside class="sidebar">
+  <div class="nav-label">Session</div>
+  <label class="field">
+    <span>Partner</span>
+    <select id="partner">
+      <option value="acme">Partner A</option>
+      <option value="globex">Partner B</option>
+    </select>
+  </label>
+  <label class="field">
+    <span>Role</span>
+    <select id="role">
+      <option value="reseller">Reseller</option>
+      <option value="distributor">Distributor</option>
+      <option value="solution_provider">Solution Provider</option>
+      <option value="principal">Principal</option>
+    </select>
+  </label>
+  <hr>
+  <label class="toggle-row">
+    <span>Debug mode</span>
+    <span class="switch"><input type="checkbox" id="debug"><span class="slider"></span></span>
+  </label>
+  <p class="hint">Show the retrieval/generation pipeline as a flowchart, with real inputs/outputs for the query just run.</p>
+</aside>
+
+<main>
+  <div class="title-row"><span class="dot"></span><h1>Partner AI Chat Bot</h1></div>
+  <div class="notice">
+    <span class="notice-icon">ℹ️</span>
+    <span><strong>Demo only.</strong> Built on publicly available Autodesk Partner WebServices reference documentation. Not an official Autodesk product; not affiliated with or endorsed by Autodesk.</span>
+  </div>
+
+  <div id="log"></div>
+
+  <form id="composer">
+    <input id="query" type="text" placeholder="Ask a question, e.g. 'How do I authenticate to the Partner WebServices API?'" autocomplete="off">
+    <button type="submit" aria-label="Send">&#10148;</button>
+  </form>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>

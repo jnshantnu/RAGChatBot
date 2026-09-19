@@ -1,0 +1,278 @@
+/* Design tokens copied from /root/alerts-dashboard's own stylesheets
+   (portfolio.css's [data-theme="light"] block, sidebar.css, discord-chat.css)
+   at the user's request to match that app's look -- not guessed from a
+   screenshot. See app/streamlit_app.py's CSS-injection block (kept in the
+   repo, unused) for where these same values were first extracted. */
+:root {
+  --font-main: 'Outfit', sans-serif;
+  --bg-main: #f8fafc;
+  --bg-card: #ffffff;
+  --bg-panel: #eef1f6;      /* discord-chat.css's --dc-panel-bg: a shade off white, for toolbar-like chrome */
+  --bg-control: rgba(0, 0, 0, 0.03);
+  --border: rgba(0, 0, 0, 0.1);
+  --border-focus: rgba(0, 150, 199, 0.4);
+  --text: #0f172a;
+  --text-muted: #64748b;
+  --cyan: #0096c7;
+  --cyan-glow: rgba(0, 150, 199, 0.15);
+  --yellow: #d97706;
+  --yellow-glow: rgba(217, 119, 6, 0.18);
+  --red: #e11d48;
+  --sidebar-w: 240px;
+  --radius-lg: 16px;
+  --radius-md: 14px;
+  --radius-sm: 8px;
+  --transition: all 0.18s ease;
+}
+
+html { overflow-x: hidden; } /* belt-and-suspenders: nothing on this page should ever need horizontal page scroll */
+* { box-sizing: border-box; margin: 0; padding: 0; font-family: var(--font-main); }
+
+/* Flex shell: sidebar + main as siblings that share the viewport width
+   directly, instead of a position:fixed sidebar plus a hand-computed
+   `padding-left` on body (the old scheme -- fragile because nothing forced
+   the two numbers to stay honest against each other at every zoom level/
+   viewport, and a fixed sidebar doesn't participate in normal overflow
+   containment the way a flex child does). min-width: 0 on main is the load-
+   bearing part: a flex item's default min-width is its content's intrinsic
+   width, so without it, one long unbreakable string (or the debug
+   flowchart's SVG) can silently force the whole row wider than the
+   viewport -- min-width: 0 makes main's own overflow-x: auto (further
+   down) responsible for that content instead of the page. */
+body {
+  background: var(--bg-main);
+  color: var(--text);
+  min-height: 100vh;
+  display: flex;
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.15); border-radius: 4px; }
+
+/* ── Sidebar ── */
+.sidebar {
+  flex: 0 0 var(--sidebar-w);
+  width: var(--sidebar-w);
+  min-height: 100vh;
+  padding: 20px 16px;
+  background: var(--bg-card);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  overflow-x: hidden;
+  transition: margin-left 0.2s ease;
+}
+
+/* Narrow screens: the sidebar becomes a slide-in overlay (fixed, off-canvas
+   by default) instead of taking a permanent slice of a screen that doesn't
+   have room to spare -- toggled by the hamburger button below, mirroring
+   alerts-dashboard's own hub-sidebar collapse pattern (sidebar.css). */
+#sidebarToggle { display: none; }
+@media (max-width: 900px) {
+  .sidebar {
+    position: fixed; top: 0; left: 0; bottom: 0; z-index: 200;
+    transform: translateX(-100%);
+    box-shadow: 0 0 0 100vw rgba(15, 23, 42, 0); /* animatable backdrop, off when closed */
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  body.sidebar-open .sidebar {
+    transform: translateX(0);
+    box-shadow: 0 0 0 100vw rgba(15, 23, 42, 0.35);
+  }
+  #sidebarToggle {
+    display: flex; align-items: center; justify-content: center;
+    position: fixed; top: 16px; left: 16px; z-index: 201;
+    width: 36px; height: 36px; border-radius: var(--radius-sm);
+    border: 1px solid var(--border); background: var(--bg-card);
+    font-size: 16px; cursor: pointer; box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12);
+  }
+}
+.nav-label {
+  font-size: 10px; font-weight: 600; letter-spacing: 0.8px; text-transform: uppercase;
+  color: var(--text-muted); opacity: 0.75; margin-bottom: 14px;
+}
+.field { display: block; margin-bottom: 16px; }
+.field span { display: block; font-size: 12.5px; color: var(--text-muted); margin-bottom: 5px; }
+.field select {
+  width: 100%; padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+  background: var(--bg-control); color: var(--text); font-family: inherit; font-size: 13.5px;
+  cursor: pointer; transition: var(--transition);
+}
+.field select:focus { outline: none; border-color: var(--border-focus); }
+.sidebar hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+
+.toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13.5px; cursor: pointer; }
+.switch { position: relative; display: inline-block; width: 36px; height: 20px; flex: none; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider {
+  position: absolute; inset: 0; background: var(--border); border-radius: 999px; cursor: pointer;
+  transition: var(--transition);
+}
+.slider::before {
+  content: ''; position: absolute; width: 16px; height: 16px; left: 2px; top: 2px;
+  background: #fff; border-radius: 50%; transition: var(--transition); box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+}
+.switch input:checked + .slider { background: var(--cyan); }
+.switch input:checked + .slider::before { transform: translateX(16px); }
+.hint { font-size: 11.5px; line-height: 1.5; color: var(--text-muted); opacity: 0.85; margin-top: 8px; }
+
+/* ── Main ──
+   A column flex box, not just a padded block: #log is given flex: 1 so it
+   fills any leftover vertical space, which is what lets #composer -- an
+   ordinary last child now, not position: fixed -- sit at the bottom of a
+   short/empty page immediately, then naturally scroll with the page and
+   stick 24px above the viewport bottom (position: sticky) once there's
+   enough chat history to scroll. No sidebar-width arithmetic anywhere. */
+main {
+  flex: 1 1 auto;
+  min-width: 0;              /* stop the debug SVG/long strings/etc from forcing this row wider than the viewport -- see the .sidebar comment above */
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  width: 100%;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 24px 32px 24px;
+}
+
+.title-row { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+.dot {
+  width: 10px; height: 10px; border-radius: 50%; background: var(--cyan);
+  box-shadow: 0 0 8px var(--cyan); animation: pulse-cyan 2s infinite;
+}
+@keyframes pulse-cyan {
+  0% { box-shadow: 0 0 0 0 rgba(0, 150, 199, 0.5); }
+  70% { box-shadow: 0 0 0 8px rgba(0, 150, 199, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(0, 150, 199, 0); }
+}
+h1 { font-size: 26px; font-weight: 600; letter-spacing: 0.3px; }
+
+.notice {
+  display: flex; gap: 10px; align-items: flex-start;
+  background: var(--cyan-glow); border: 1px solid var(--border-focus);
+  border-radius: 12px; padding: 14px 18px; font-size: 13.5px; line-height: 1.55; margin-bottom: 20px;
+}
+
+#log { flex: 1 1 auto; display: flex; flex-direction: column; gap: 14px; margin-bottom: 20px; min-width: 0; }
+
+/* ── Turns ── */
+.turn { display: flex; gap: 12px; align-items: flex-start; }
+.avatar {
+  width: 32px; height: 32px; flex: none; border-radius: var(--radius-sm);
+  background: var(--bg-control); border: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center; font-size: 14px;
+}
+.card {
+  flex: 1; min-width: 0; background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius-md); padding: 14px 18px;
+}
+.turn.user .card { background: var(--bg-panel); font-size: 14px; }
+.turn.user .card b { font-weight: 700; }
+
+.status-line { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--text-muted); }
+.spinner {
+  width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--border);
+  border-top-color: var(--cyan); animation: spin 0.7s linear infinite; flex: none;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.status-line.done { color: var(--text); }
+.status-line .check { color: var(--cyan); }
+
+.answer-text { font-size: 14.5px; line-height: 1.6; margin-top: 8px; }
+.answer-text p, .answer-text ul { margin-bottom: 10px; }
+.answer-text p:last-child, .answer-text ul:last-child { margin-bottom: 0; }
+.answer-text ul { padding-left: 20px; }
+.answer-text li { margin-bottom: 5px; }
+.answer-text li:last-child { margin-bottom: 0; }
+.answer-text strong { font-weight: 700; }
+.answer-text .ans-heading { font-size: 15.5px; font-weight: 700; margin-top: 4px; }
+
+.answer-text .code-block {
+  background: #0f172a; color: #e2e8f0; border-radius: var(--radius-sm);
+  padding: 12px 14px; margin-bottom: 10px; overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; line-height: 1.55;
+}
+.answer-text .code-block:last-child { margin-bottom: 0; }
+.answer-text .code-block code { white-space: pre; }
+.answer-text .inline-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em;
+  background: var(--bg-control); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px;
+}
+
+.tags { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+.tag { font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 999px; }
+.tag.abstained { background: var(--red); color: #fff; }
+.tag.refused { background: var(--yellow); color: #fff; }
+.tag.degraded { background: var(--border); color: var(--text-muted); }
+
+.meta-caption { font-size: 12px; color: var(--text-muted); margin-top: 8px; }
+
+details.expander {
+  margin-top: 10px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg-control); overflow: hidden;
+}
+details.expander summary {
+  padding: 8px 12px; font-size: 13px; cursor: pointer; list-style: none; user-select: none;
+  display: flex; align-items: center; justify-content: space-between;
+}
+details.expander summary::-webkit-details-marker { display: none; }
+details.expander summary::after { content: '▾'; color: var(--text-muted); transition: var(--transition); }
+details.expander[open] summary::after { transform: rotate(180deg); }
+details.expander .expander-body { padding: 4px 12px 12px; font-size: 12.5px; }
+
+table.scores { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+table.scores th, table.scores td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--border); }
+table.scores th { color: var(--text-muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.3px; }
+table.scores td.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+pre.json { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; white-space: pre-wrap; word-break: break-word; color: var(--text); }
+
+/* ── Composer ── */
+#composer {
+  position: sticky; bottom: 24px;
+  flex: none;
+  display: flex; gap: 8px;
+  background: var(--bg-main); /* opaque -- content scrolling underneath shouldn't show through */
+  padding-top: 8px;
+}
+#composer input {
+  flex: 1; padding: 12px 16px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--bg-card); color: var(--text); font-family: inherit; font-size: 14px;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06); transition: var(--transition);
+}
+#composer input:focus { outline: none; border-color: var(--border-focus); }
+#composer button {
+  width: 44px; height: 44px; border-radius: 50%; border: none; background: var(--cyan);
+  color: #fff; font-size: 16px; cursor: pointer; transition: var(--transition); flex: none;
+}
+#composer button:hover { opacity: 0.88; }
+#composer button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Debug mode: flowchart + timeline + detail cards ── */
+.debug-section { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+.debug-caption { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }
+.flow-wrap { overflow-x: auto; overflow-y: hidden; padding: 4px; margin-bottom: 14px; }
+.trace-node { transform-box: fill-box; transform-origin: center; transition: transform 0.18s ease; cursor: pointer; }
+.trace-node:hover { transform: scale(1.45); }
+
+.timeline { background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 14px 18px 10px; margin-bottom: 14px; }
+.timeline h4 { font-size: 14px; margin-bottom: 8px; }
+.timeline h4 span { font-weight: 400; color: var(--text-muted); font-size: 12.5px; }
+.tl-row { display: grid; grid-template-columns: 190px 1fr 80px; align-items: center; height: 24px; font-size: 12.5px; }
+.tl-row .val { text-align: right; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.tl-track { position: relative; height: 16px; }
+.tl-track i { position: absolute; top: 0; bottom: 0; border-left: 1px solid var(--border); }
+.tl-bar { position: absolute; top: 2px; height: 12px; border-radius: 3px; min-width: 3px; }
+.tl-axis { display: grid; grid-template-columns: 190px 1fr 80px; font-size: 11px; color: var(--text-muted); height: 16px; }
+.tl-axis .scale { position: relative; }
+.tl-axis .scale b { position: absolute; font-weight: 400; transform: translateX(-50%); }
+.tl-legend { font-size: 11.5px; color: var(--text-muted); margin-top: 4px; }
+
+.detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.detail-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; }
+.detail-card h5 { font-size: 12.5px; margin-bottom: 4px; }
+.detail-card .timing { font-size: 11px; color: var(--text-muted); margin-bottom: 6px; }
+
+@media (max-width: 900px) {
+  .sidebar { width: min(var(--sidebar-w), 82vw); padding-top: 64px; } /* an 82vw cap so the overlay never itself overflows a very narrow phone; top padding clears the fixed hamburger button */
+  main { padding: 64px 16px 16px; }
+}

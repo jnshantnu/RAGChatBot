@@ -8,11 +8,20 @@ Mirrors the two distinct "no" paths from the case study's architecture:
     post-fusion score spread -- not from permissions.
 
 Query rewriting (retrieval/query_rewrite.py) sits between those two: it runs
-on the ORIGINAL query (permission refusal already checked it), and its output
-feeds both retrieval and generation. Role is still passed to generate_answer
-separately too, even when a rewrite already mentions it -- the rewriter's
-triggers are pattern-based and won't catch every phrasing, so the explicit
-role stays as a general-purpose backstop rather than the only signal.
+on the ORIGINAL query (permission refusal already checked it) and produces
+TWO texts, not one -- a retrieval_query and a generation_query, identical
+unless the rewriter stripped a trailing format-request clause (e.g. "...give
+me sample code in Node.js"). That split exists because the cross-encoder
+reranker (retrieval/rerank.py) turned out to be fooled by that clause's own
+wording: a page that just points at code samples outranked a page that
+actually explains the mechanism, until the clause was left out of the
+reranked query specifically (measured, not assumed -- see
+_strip_code_request's own comment). Generation still gets the full request,
+so it knows to write code; only retrieval searches on the topic alone. Role
+is still passed to generate_answer separately too, even when a rewrite
+already mentions it -- the rewriter's triggers are pattern-based and won't
+catch every phrasing, so the explicit role stays as a general-purpose
+backstop rather than the only signal.
 """
 import time
 from dataclasses import asdict, dataclass, field
@@ -111,6 +120,7 @@ class PendingAnswer:
     partner: str
     mode: str
     retrieval_query: str
+    generation_query: str
     rewrite: RewriteResult
     rewrite_trace: TraceStep
     result: RetrievalResult
@@ -122,7 +132,7 @@ class PendingAnswer:
 
     def stream(self):
         t0 = self.generate_started_at = time.perf_counter()
-        for delta in stream_answer(self.retrieval_query, self.result.top_k, self.role):
+        for delta in stream_answer(self.generation_query, self.result.top_k, self.role):
             if self.first_token_ms is None:
                 self.first_token_ms = round((time.perf_counter() - self.t_start) * 1000, 1)
             self.text += delta
@@ -131,7 +141,7 @@ class PendingAnswer:
 
     def complete(self) -> "ChatResponse":
         t0 = self.generate_started_at = time.perf_counter()
-        generated = generate_answer(self.retrieval_query, self.result.top_k, self.role)
+        generated = generate_answer(self.generation_query, self.result.top_k, self.role)
         self.generate_ms = round((time.perf_counter() - t0) * 1000, 1)
         return self.finish(generated)
 
@@ -191,15 +201,24 @@ def prepare_answer(query: str, role: str, partner: str, mode: str = "sequential"
         )
 
     # Rewrite (retrieval/query_rewrite.py): role injection, synonym
-    # normalization, or bare-term expansion, whichever rule's trigger
-    # matches. A no-op for queries that don't match any trigger -- retrieval
-    # and generation below just get the original query text back unchanged.
+    # normalization, bare-term expansion, vocabulary typo correction, or
+    # a code-request split, whichever rules' triggers match. A no-op for
+    # queries that don't match any trigger -- retrieval and generation below
+    # just get the original query text back unchanged. retrieval_query and
+    # generation_query differ only when a trailing "give me sample code in
+    # X" clause got stripped for retrieval (see query_rewrite.py's
+    # _strip_code_request) -- retrieval searches on the topic alone,
+    # generation still sees the full request so it knows to write code.
     t0 = time.perf_counter()
     rewrite = rewrite_query(query, role)
     retrieval_query = rewrite.rewritten_query
+    generation_query = rewrite.generation_query
+    rewrite_outputs = {"rewritten_query": retrieval_query, "rules_applied": rewrite.rules_applied}
+    if generation_query != retrieval_query:
+        rewrite_outputs["generation_query"] = generation_query
     rewrite_trace = TraceStep(
         name="Query Rewrite", inputs={"query": query, "role": role},
-        outputs={"rewritten_query": retrieval_query, "rules_applied": rewrite.rules_applied},
+        outputs=rewrite_outputs,
         timing_ms=round((time.perf_counter() - t0) * 1000, 1), started_at=t0,
     )
 
@@ -231,7 +250,7 @@ def prepare_answer(query: str, role: str, partner: str, mode: str = "sequential"
     # model can resolve "me" even when the rewriter's triggers didn't fire.
     return PendingAnswer(
         query=query, role=role, partner=partner, mode=mode,
-        retrieval_query=retrieval_query, rewrite=rewrite, rewrite_trace=rewrite_trace,
+        retrieval_query=retrieval_query, generation_query=generation_query, rewrite=rewrite, rewrite_trace=rewrite_trace,
         result=result, t_start=t_start,
     )
 
