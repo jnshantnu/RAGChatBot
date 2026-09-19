@@ -1,0 +1,14 @@
+# Streamlit's built-in theming -- see
+# https://docs.streamlit.io/develop/concepts/configuration/theming
+# Colors/font pulled directly from /root/alerts-dashboard's own design system
+# (static/portfolio.css's [data-theme="light"] tokens, static/sidebar.css,
+# static/discord-chat.css) at the user's request to match that app's look --
+# not eyeballed from a screenshot. See the CSS block in app/streamlit_app.py
+# for what this base palette doesn't reach.
+[theme]
+base = "light"
+primaryColor = "#0096c7"           # portfolio.css [data-theme="light"] --cyan -- the whole app's one accent color
+backgroundColor = "#f8fafc"        # --bg-main
+secondaryBackgroundColor = "#ffffff"  # --bg-glass-card
+textColor = "#0f172a"              # --color-text
+font = "sans serif"                # actual font is 'Outfit' -- loaded via @import in the CSS block, config.toml only accepts the three generic names

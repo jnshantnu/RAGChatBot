@@ -35,7 +35,79 @@ def _warm_reranker():
 
 _warm_reranker()
 
-st.title("Partner AI Chat Bot")
+# CSS injection on top of .streamlit/config.toml's base theme -- everything
+# the theme API doesn't reach. Values (font, colors, radii, borders) are
+# copied from /root/alerts-dashboard's own stylesheets (portfolio.css,
+# sidebar.css, discord-chat.css), at the user's request to match that app's
+# look, not guessed. Targets Streamlit's own `data-testid` hooks (confirmed
+# against the real rendered DOM), which are more stable release to release
+# than its auto-generated CSS class names, but are still an internal
+# implementation detail, not a public API -- a future Streamlit upgrade can
+# rename or drop one. If the UI ever looks partially unstyled after an
+# upgrade, this block is the first place to check.
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+html, body, [class*="css"] { font-family: 'Outfit', sans-serif; }
+
+/* Header: alerts-dashboard's frosted sticky bar (--bg-header, blur(12px)) */
+[data-testid="stHeader"] {
+    background: rgba(248, 250, 252, 0.85); backdrop-filter: blur(12px);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+/* Sidebar: alerts-dashboard's hub-sidebar rail. Section header styled like
+   .hub-sidebar-section (10px uppercase, letter-spaced, 65% opacity) */
+[data-testid="stSidebar"] { border-right: 1px solid rgba(0, 0, 0, 0.1); }
+[data-testid="stSidebar"] h2 {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.8px; text-transform: uppercase;
+    color: #64748b; opacity: 0.65; margin-bottom: 4px;
+}
+
+/* Two-tier surface system, straight from discord-chat.css: pure-white cards
+   for content (chat bubbles, bordered score/timing panels) vs. a slightly
+   tinted "panel" tone (--dc-panel-bg: #eef1f6) for toolbar-like chrome (the
+   retrieval status widget) -- same distinction their Messages/Digest toolbar
+   draws against their message cards. */
+[data-testid="stChatMessage"], [data-testid="stVerticalBlockBorderWrapper"] {
+    background: #ffffff; border: 1px solid rgba(0, 0, 0, 0.1); border-radius: 14px;
+}
+[data-testid="stChatMessage"] { padding: 4px 6px; margin-bottom: 10px; }
+[data-testid="stStatusWidget"] {
+    background: #eef1f6; border: 1px solid rgba(0, 0, 0, 0.1); border-radius: 14px;
+}
+
+/* Chat avatars: rounded-square icon badges like .acct-icon (26px, 8px
+   radius, bg var(--bg-glass), hairline border) rather than plain circles */
+[data-testid="stChatMessageAvatarUser"], [data-testid="stChatMessageAvatarAssistant"] {
+    background: rgba(0, 0, 0, 0.03) !important; border: 1px solid rgba(0, 0, 0, 0.1) !important;
+    border-radius: 8px !important;
+}
+
+[data-testid="stAlertContainer"] { border-radius: 12px; }
+[data-testid="stExpander"] { border-radius: 12px; border-color: rgba(0, 0, 0, 0.1); }
+
+/* Title-row dot: alerts-dashboard's .logo-glow -- a small pulsing cyan dot
+   next to the page name (same @keyframes pulse-cyan as portfolio.css) */
+@keyframes pulse-cyan {
+    0% { box-shadow: 0 0 0 0 rgba(0, 150, 199, 0.5); }
+    70% { box-shadow: 0 0 0 8px rgba(0, 150, 199, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(0, 150, 199, 0); }
+}
+.rag-title-dot {
+    width: 10px; height: 10px; border-radius: 50%; background: #0096c7;
+    box-shadow: 0 0 8px #0096c7; animation: pulse-cyan 2s infinite; display: inline-block;
+}
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown(
+    '<div style="display:flex; align-items:center; gap:10px; margin-bottom:4px;">'
+    '<span class="rag-title-dot"></span>'
+    '<span style="font-size:26px; font-weight:600; letter-spacing:0.5px; color:#0f172a;">Partner AI Chat Bot</span>'
+    '</div>',
+    unsafe_allow_html=True,
+)
 st.info(
     "**Demo only.** Built on publicly available Autodesk Partner WebServices "
     "reference documentation. Not an official Autodesk product; not affiliated "
@@ -57,7 +129,7 @@ with st.sidebar:
         }[r],
     )
     st.divider()
-    debug_mode = st.checkbox(
+    debug_mode = st.toggle(
         "Debug mode", value=False,
         help="Show the retrieval/generation pipeline as a flowchart, with real inputs/outputs for the query just run.",
     )
