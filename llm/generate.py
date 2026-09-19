@@ -65,27 +65,25 @@ def _build_context_block(chunks: list[FusedResult]) -> str:
     return "\n\n".join(lines)
 
 
-def generate_answer(query: str, citable_chunks: list[FusedResult], role: str) -> GeneratedAnswer:
+def _messages(query: str, citable_chunks: list[FusedResult], role: str) -> list[dict]:
     # Assemble the user-turn prompt: session role, then numbered citable
     # context, then the question. The role is what lets the model resolve
     # "me" in a question like "which APIs are available to me" -- see the
     # module docstring for why ACL alone can't do this.
     user_prompt = f"Session role: {role}\n\nContext:\n{_build_context_block(citable_chunks)}\n\nQuestion: {query}"
+    return [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": user_prompt},
+    ]
 
-    response = _client.chat.completions.create(
-        model=config.OPENROUTER_CHAT_MODEL,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ],
-        temperature=0,
-    )
-    answer_text = response.choices[0].message.content or ""
 
+def finalize_answer(answer_text: str, citable_chunks: list[FusedResult]) -> GeneratedAnswer:
     # Citation verification: pull every [N] the model wrote out of the answer
     # text, keep only the ones that are actually valid chunk numbers (guards
     # against the model inventing a citation number that doesn't exist), and
-    # map each back to the chunk_id it refers to.
+    # map each back to the chunk_id it refers to. Runs on the *complete* text,
+    # so the streaming path calls this once the stream has ended -- a citation
+    # can't be verified from a partial answer.
     cited_indices = {int(n) for n in re.findall(r"\[(\d+)\]", answer_text)}
     valid_indices = set(range(1, len(citable_chunks) + 1))
     cited_chunk_ids = [citable_chunks[i - 1].chunk_id for i in cited_indices if i in valid_indices]
@@ -100,3 +98,32 @@ def generate_answer(query: str, citable_chunks: list[FusedResult], role: str) ->
         cited_chunk_ids=cited_chunk_ids,
         uncited_claims_flagged=uncited,
     )
+
+
+def generate_answer(query: str, citable_chunks: list[FusedResult], role: str) -> GeneratedAnswer:
+    response = _client.chat.completions.create(
+        model=config.OPENROUTER_CHAT_MODEL,
+        messages=_messages(query, citable_chunks, role),
+        temperature=0,
+    )
+    return finalize_answer(response.choices[0].message.content or "", citable_chunks)
+
+
+def stream_answer(query: str, citable_chunks: list[FusedResult], role: str):
+    """Same request as generate_answer, but yields the answer's text as the model
+    writes it instead of returning it all at once. Total generation time is the
+    same; what changes is that the first words are available almost
+    immediately. Callers collect the yielded text and pass it to
+    finalize_answer() afterward for citation verification."""
+    stream = _client.chat.completions.create(
+        model=config.OPENROUTER_CHAT_MODEL,
+        messages=_messages(query, citable_chunks, role),
+        temperature=0,
+        stream=True,
+    )
+    for chunk in stream:
+        if not chunk.choices:
+            continue
+        delta = chunk.choices[0].delta.content
+        if delta:
+            yield delta

@@ -81,3 +81,26 @@ Different mechanism than the embedding step's slowness. The model has to (1) fir
 - **`MIN_RERANK_SCORE` is the literal decision threshold trading one against the other.** Lowering it from `0.30` to `0.20` earlier in this project directly increased how often genuinely answerable-but-vague questions get answered, at the cost of risking more noise slipping through — the textbook classifier-threshold trade-off, tuned against real labeled examples (the golden set), not picked arbitrarily.
 - **F1** would be the single number balancing those two abstain-classifier metrics — useful because neither extreme (always abstain / never abstain) is good, and optimizing only one of precision or recall in isolation rewards exactly that kind of useless extreme.
 - **Generation/citation precision**, more loosely: `llm/generate.py`'s `uncited_claims_flagged` is a crude proxy for "of the claims made, how many are actually backed by a real citation" — the same underlying question precision asks, just not measured as a real rate today.
+
+### How did you make it faster — and how do you know it worked?
+
+Measured first, then changed one thing at a time, with a benchmark and a quality check for each.
+
+- **Hypothesis 1: run independent steps concurrently.** Keyword search, embed + semantic search, and the guaranteed-content fetch don't depend on each other, so I ran them in parallel threads (each with its own DB connection — psycopg connections aren't thread-safe) and merged the two rerank calls into one batch. Result over 18 paired queries: **median 0.87x, faster in only 4 of 18 — no reliable gain.** Those steps are already fast (tens of ms); the time is in the embedding network call, the reranker, and the LLM. I kept the change (behaviour-identical, verified) but don't claim it as the win.
+- **Hypothesis 2: the reranker is CPU-bound and cost scales with input length.** The corpus chunks are ~400 tokens, so capping what the cross-encoder reads at 256 tokens roughly halves its work. Micro-benchmark, 20 candidates: **512 tokens 2,575 ms → 256 tokens 1,061 ms → 128 tokens 535 ms.** End to end, retrieval median **3.04 s → 1.75 s (~1.76x), faster in 17 of 18 pairs.**
+- **Quality check before accepting it** (31 questions: the 20-question golden set plus 11 role-based ones, through the query rewriter; the full-length reranker is the relevance judge). At 256 tokens: golden-set recall@5/@10, abstain decisions, and guaranteed-content checks were all **identical**; top-5 relevance kept **~97.7% (NDCG@5 = 0.977)**. Honest cost: individual queries can pick a noticeably weaker #1 chunk (worst case scored 57% of the best chunk's relevance).
+- **What I rejected, and why.** 128 tokens: noise-question scores cross the confidence gate's 0.01 rescue floor and one correct abstain flipped to an answer. Reranking 10 candidates instead of 20: passes the golden set (14/14) but loses ~10% of relevance (NDCG@5 0.896) — a regression the golden set alone wouldn't have caught, which is why I measured NDCG separately.
+
+**One-liner:** "Parallelism gave nothing; the real bottleneck was reranker input length. I cut it in half, validated it didn't change any gate decision, and disclosed the ~2% relevance cost."
+
+### Why does the same query take very different times on different runs?
+
+Three of the steps are dominated by network or provider latency, not by anything in the pipeline:
+
+- **Embedding call** (OpenRouter → `qwen3-embedding-8b`): observed anywhere from **~0.17 s to ~12 s** for the same code and similar queries. It's a single unbroken network request; provider queueing or an SDK retry (the OpenAI client retries twice by default with backoff) are plausible causes, not confirmed. No explicit timeout is set — a short timeout with one retry would trade a rare 12 s stall for a bounded ~3 s one.
+- **LLM generation:** ~2.5–7 s. About 339 of a typical 533 output tokens are hidden reasoning tokens, so the first visible word arrives ~3.8–4.7 s into a 5.4–7.1 s call. With reasoning disabled in a test, the first word came at 1.6 s and total 2.6 s — a real lever, but it's a quality trade-off I haven't validated (role-scoping correctness and the "I don't have that information" backstop are what I'd test first).
+- **Reranker:** the only step on local hardware, so it's stable (~1.4 s tuned); the first request after a restart used to pay a ~30 s model load, which is why the server preloads it at startup.
+
+**Why this matters for how I report results:** a single end-to-end comparison mixes the parts I changed with parts I didn't, so I compare the stage I actually changed (rerank time) and use paired runs over many queries, rather than quoting one headline "Nx faster".
+
+**Also worth knowing:** even the "same" query isn't perfectly deterministic — on queries where the gate abstains, Postgres breaks ties between near-zero scores arbitrarily, and the LLM's choice of which chunk to cite can vary between identical-context calls. The right proof that two pipeline versions retrieve the same thing is the *composition* of the top-K, not the citation text.

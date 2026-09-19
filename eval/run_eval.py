@@ -21,7 +21,7 @@ GOLDEN_SET_PATH = os.path.join(os.path.dirname(__file__), "golden_set.json")
 ALL_GROUPS = ["public", "partner:acme", "partner:globex", "role:principal", "role:distributor"]
 
 
-def run_eval():
+def run_eval(mode: str = "sequential"):
     # For each golden-set query: run the exact same retrieve() the app uses,
     # then check whether the expected document shows up in the top 5/10
     # results (for answerable queries) or whether the gate correctly abstains
@@ -43,7 +43,7 @@ def run_eval():
     rows = []
     with psycopg.connect(config.DATABASE_URL) as conn:
         for case in golden_set:
-            result = retrieve(conn, case["query"], ALL_GROUPS)
+            result = retrieve(conn, case["query"], ALL_GROUPS, mode=mode)
 
             # Independent of the case's main type below: some queries need
             # guaranteed content to score as genuinely relevant (not just
@@ -86,6 +86,7 @@ def run_eval():
                 abstain_correct += correct
                 rows.append((case["query"][:50], "unanswerable", "-", "-", result.gate.abstain))
 
+    print(f"pipeline mode: {mode}")
     print(f"{'query':52} {'type':13} {'hit@5':6} {'hit@10':7} abstained")
     for q, kind, h5, h10, abstained in rows:
         print(f"{q:52} {kind:13} {str(h5):6} {str(h10):7} {abstained}")
@@ -108,4 +109,6 @@ def run_eval():
 
 
 if __name__ == "__main__":
-    run_eval()
+    # `python -m eval.run_eval` runs the baseline pipeline; pass "parallel" to
+    # run the optimized one (`python -m eval.run_eval parallel`).
+    run_eval(sys.argv[1] if len(sys.argv) > 1 else "sequential")
