@@ -24,3 +24,15 @@ def test_each_labeled_query_matches(case, shipped_vocab):
     for fragment in case.get("normalized_contains", []):
         assert fragment.lower() in r.normalized_query.lower(), f"{fragment!r} missing from {r.normalized_query!r}"
     assert 0.0 <= r.confidence <= 1.0 and len(r.expansion_terms) <= 8
+
+
+def test_llm_classifier_eval_rows_all_fall_through_the_rules(shipped_vocab):
+    """The LLM eval set is only meaningful if the rules return `unknown` for every row --
+    otherwise the fallback is never exercised. Reword a row that starts being handled by the rules."""
+    import json, os
+    from retrieval.query_understanding import understand_query
+
+    path = os.path.join(os.path.dirname(__file__), "..", "eval", "llm_classifier_set.json")
+    for case in json.load(open(path, encoding="utf-8")):
+        r = understand_query(case["query"], "reseller", vocab=shipped_vocab, enabled=True, llm_enabled=False)
+        assert r.intent.value == "unknown", case["query"]

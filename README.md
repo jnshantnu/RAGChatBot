@@ -51,7 +51,7 @@ python -m retrieval.cli_test "Does the platform support Slack notifications?"   
 # 3. Run the eval harness (and the automated tests -- `pip install -r requirements-dev.txt` first)
 python -m eval.run_eval
 pytest
-python -m eval.run_understanding_eval    # query-understanding accuracy; add --retrieval for the retrieval comparison
+python -m eval.run_understanding_eval    # query-understanding accuracy; add --retrieval for the retrieval comparison, --llm for the LLM-fallback check
 
 # 4. Start the web UI
 uvicorn app.main:app --reload
@@ -126,7 +126,8 @@ map artifact in detail:
   scores, degraded/abstain flags), no tracing infra.
 - **Query rewriter**: implemented as a rule-based rewriter (`retrieval/query_rewrite.py`) plus a
   query-understanding stage (`retrieval/query_understanding/`: normalization, protected terms,
-  intent / API-role classification). Deterministic, no LLM call. See `docs/query-understanding.md`.
+  intent / API-role classification). Deterministic rules; an optional, off-by-default LLM fallback
+  (`QUERY_LLM_CLASSIFIER_ENABLED`) handles questions the rules can't classify. See `docs/query-understanding.md`.
 - **Reindexing / blue-green**: not implemented -- ingestion re-embeds in place.
 - **Cache lookup**: not implemented (query + index_version + permission key).
 - **Spreadsheet/PPTX ingestion**: not implemented -- PDFs only for now (see

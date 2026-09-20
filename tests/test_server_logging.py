@@ -74,3 +74,21 @@ def test_final_event_carries_the_understanding_and_clarification_flag(monkeypatc
     events = list(server._stream_chat(server.ChatRequest(query="q", role="reseller", partner="acme")))
     final = json.loads(events[-1].split("data: ")[1])
     assert final["clarification"] is True and final["understanding"]["intent"] == "api_implementation"
+
+
+def test_log_says_who_classified_and_whether_the_llm_ran(log_path):
+    req = server.ChatRequest(query="how do I hook my order system up to your order feed", role="reseller", partner="acme")
+    understanding = understand_query(req.query, "reseller", enabled=True, llm_enabled=True,
+                                     llm=lambda q, e: (_ for _ in ()).throw(RuntimeError("down"))).to_dict()
+    response = chat.ChatResponse(query=req.query, role="reseller", partner="acme", answer="a", understanding=understanding,
+                                 timings_ms={"llm_classification_ms": 3001.0})
+    server._log_request(req, response, 1.0, "id")
+    line = json.loads(log_path.read_text())
+    assert (line["classifier"], line["llm_classifier_called"], line["llm_classifier_fallback"]) == ("rules", True, True)
+
+
+def test_log_shows_rules_only_requests_did_not_call_the_llm(log_path):
+    req = server.ChatRequest(query="which APIs can I implement for biz trade in?", role="reseller", partner="acme")
+    server._log_request(req, make_response(), 1.0, "id")
+    line = json.loads(log_path.read_text())
+    assert (line["classifier"], line["llm_classifier_called"], line["llm_classifier_fallback"]) == ("rules", False, False)

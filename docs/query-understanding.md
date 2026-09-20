@@ -20,6 +20,7 @@ query understanding            retrieval/query_understanding/
   ├─ mask protected spans      URLs, paths, code, error codes, IDs, versions, API names...
   ├─ normalize                 whitespace -> abbreviations -> synonyms -> high-confidence typos
   ├─ classify (rules)          intent, API role, ambiguity, program / partner type / region
+  ├─ classify (LLM, optional)  only when the rules say `unknown`; flag-guarded, off by default
   └─ QueryUnderstandingResult  (see schema below)
   ▼
 query rewrite                  retrieval/query_rewrite.py   -- runs on the NORMALIZED text
@@ -55,7 +56,8 @@ A frozen dataclass, validated on construction (bad enum or a confidence outside
 | `corrected_terms` | audit trail: `{original, normalized, reason: abbreviation\|synonym\|typo, confidence}` |
 | `ambiguity` / `clarifying_question` | true when the wording could mean more than one API direction |
 | `confidence` | 0..1 for the classification |
-| `warnings` | e.g. a near-miss typo that was deliberately **not** corrected |
+| `warnings` | e.g. a near-miss typo that was deliberately **not** corrected; `llm_classifier_failed` / `llm_classifier_not_confident` when the optional LLM fallback ran but its answer was not used |
+| `classifier` | who decided intent / API role: `rules`, `llm` (the optional fallback), or `none` (stage bypassed) |
 
 `QueryUnderstandingResult.fallback(text)` is the "do nothing" result: the text
 is used as-is, `intent=unknown`, `api_role=unclear`, and `is_fallback` is true.
@@ -100,7 +102,37 @@ The service does not crash. `tests/test_vocabulary.py` guards the shipped file.
 
 Settings (env vars, read in `config.py`):
 `QUERY_UNDERSTANDING_ENABLED` (default `true`; `false` bypasses the stage) and
-`QUERY_VOCABULARY_PATH` (default: the file above).
+`QUERY_VOCABULARY_PATH` (default: the file above). The LLM fallback has its own
+settings, described in the next section.
+
+## Optional LLM classifier fallback
+
+Rules only recognise the phrasings the vocabulary lists ("how do I hook my order
+system up to your order feed" is `unknown` to them). When -- and only when -- the
+rules return `unknown` for a question of 3+ words, **one** call to a small
+non-reasoning model classifies it (`llm_classifier.py`).
+
+| env var | default | |
+|---|---|---|
+| `QUERY_LLM_CLASSIFIER_ENABLED` | `false` | turn the fallback on (`true`), then restart |
+| `QUERY_LLM_CLASSIFIER_MODEL` | `openai/gpt-4o-mini` | any OpenRouter chat model; pick a small, non-reasoning one |
+| `QUERY_LLM_CLASSIFIER_TIMEOUT_S` | `3` | hard cap on the call; no retries |
+
+Guarantees:
+
+* **Classifies only.** The model returns `{intent, api_role, confidence}`. It never rewrites the search text and never sees document content. The reply is validated against the `Intent` / `ApiRole` enums; anything else is discarded.
+* **Never blocks a request.** A timeout, HTTP error, bad JSON, `unknown`, or confidence below 0.6 keeps the rules' result (`classifier: "rules"`, plus a warning saying why).
+* **No model-written text reaches the user.** For the "implement, direction unclear" case the clarifying question is still the vocabulary's canonical one.
+* **Names sent to the model:** only entities already found in the user's *own* question. The vocabulary's API / program lists are never sent. Access control still comes only from the session's ACL groups.
+* The model's confidence is capped at 0.75 so it never outranks a rules-derived classification. The role is made consistent with the intent (a business-model question has no API role, "consumption" implies the platform-call direction, and so on).
+* The question text goes to the same provider (OpenRouter) that already receives it for answer generation.
+
+Cost: it runs only on the uncertain minority of questions, and adds one model
+round trip (about 0.7-1.6 s measured, capped at the timeout) *before* retrieval
+starts on those questions. Watch `llm_classification_ms` in the log.
+
+Judge it with `python -m eval.run_understanding_eval --llm` (13 real calls).
+`tests/test_llm_classifier.py` covers everything with a fake model.
 
 ## Protected terms
 
@@ -157,9 +189,11 @@ grounding, citation and exact-refusal rules are unchanged.
 One JSON line per request in `logs/requests.jsonl`. New fields: `request_id`
 (also sent to the browser in the first SSE event), `intent`, `api_role`,
 `ambiguity`, `clarification`, `normalization_count`, `corrected_terms_count`,
-`understanding_fallback`, `retrieval_query_count`, `retrieval_result_count`,
+`understanding_fallback`, `classifier` (`rules`/`llm`/`none`),
+`llm_classifier_called`, `llm_classifier_fallback` (called, but the rules'
+result was kept), `retrieval_query_count`, `retrieval_result_count`,
 `retrieval_fallback_used`, and in `timings_ms`: `normalization_ms`,
-`classification_ms`, `understand_ms`, plus the existing retrieve/rerank/generate/
+`classification_ms`, `llm_classification_ms` (only when the LLM ran), `understand_ms`, plus the existing retrieve/rerank/generate/
 total timings. These are counts and categories only; the log already recorded
 `query` before this stage existed and nothing else adds user text. The debug
 view's "Query Rewrite" step shows the full result.
@@ -198,7 +232,8 @@ consumption, webhook publication, Buy-Sell vs NxM, troubleshooting phrasing.
 
 ## Known limitations
 
-* **Rules, not a model.** Phrasing the rules don't cover falls back to `unknown`/`unclear`. A small LLM classifier for the uncertain cases is a planned, separate, flag-guarded step.
+* **Rules first.** Phrasing the rules don't cover is `unknown`/`unclear` unless the optional LLM fallback (above) is switched on. With it on, a model can still be wrong or vary between runs even at temperature 0; on the 13-row fallback set (`eval/llm_classifier_set.json`, rules alone 3/13) it got 8/13 exact, with the misses being a timeout, a low-confidence "stay unknown", a debatable policy-vs-business-model label, and two "implement -> ask which direction" outcomes. Treat that set as a smoke test, not an accuracy claim.
+* **The LLM call is sequential.** It runs before retrieval starts, so on the questions that need it the user waits for it. Running it alongside retrieval would hide that latency (not done).
 * **The labeled set was written alongside the rules**, so 100% on it overstates real accuracy. Grow it with real traffic, and keep some rows unseen when tuning.
 * **Single search query today.** Searching with several query forms (original + enriched) and merging is a planned, separate step; `expansion_terms` are computed and reported but not yet used to widen the search.
 * **Normalization does not restructure grammar.** `which APIs i can implement` becomes `Which APIs I can implement`, not `...can I implement`.

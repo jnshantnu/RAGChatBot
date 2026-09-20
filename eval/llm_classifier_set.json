@@ -1,0 +1,80 @@
+[
+  {
+    "query": "how do I hook my order system up to your order feed",
+    "intent": "api_consumption",
+    "api_role": "consumes_platform_api",
+    "ambiguity": false
+  },
+  {
+    "query": "we want our warehouse to be told when a quote gets approved",
+    "intent": "api_publication",
+    "api_role": "exposes_partner_api",
+    "ambiguity": false
+  },
+  {
+    "query": "can I take on customers based outside my country",
+    "intent": "program_eligibility",
+    "api_role": "not_applicable",
+    "ambiguity": false
+  },
+  {
+    "query": "how does the revenue split between you and us work",
+    "intent": "business_model",
+    "api_role": "not_applicable",
+    "ambiguity": false
+  },
+  {
+    "query": "my requests keep getting rejected with a 401 after an hour",
+    "intent": "api_authentication",
+    "api_role": "consumes_platform_api",
+    "ambiguity": false
+  },
+  {
+    "query": "nothing comes back when I ask for a customer record",
+    "intent": "troubleshooting",
+    "api_role": "not_applicable",
+    "ambiguity": false
+  },
+  {
+    "query": "what are the first steps for a brand new partner",
+    "intent": "onboarding",
+    "api_role": "not_applicable",
+    "ambiguity": false
+  },
+  {
+    "query": "what interfaces does the platform offer for subscriptions",
+    "intent": "api_discovery",
+    "api_role": "unclear",
+    "ambiguity": false
+  },
+  {
+    "query": "what happens to a customer's price when they switch to a smaller plan",
+    "intent": "program_policy",
+    "api_role": "not_applicable",
+    "ambiguity": false
+  },
+  {
+    "query": "we plan to build something against your order data",
+    "intent": "api_consumption",
+    "api_role": "consumes_platform_api",
+    "ambiguity": false
+  },
+  {
+    "query": "what is the weather in Paris today",
+    "intent": "unknown",
+    "api_role": "unclear",
+    "ambiguity": false
+  },
+  {
+    "query": "write me a poem about clouds and servers",
+    "intent": "unknown",
+    "api_role": "unclear",
+    "ambiguity": false
+  },
+  {
+    "query": "can you tell me a joke about databases",
+    "intent": "unknown",
+    "api_role": "unclear",
+    "ambiguity": false
+  }
+]

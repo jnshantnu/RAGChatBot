@@ -80,10 +80,13 @@ def _log_request(req: ChatRequest, result: ChatResponse, wall_ms: float, request
         "normalization_count": len(terms),
         "corrected_terms_count": sum(1 for t in terms if t.get("reason") == "typo"),
         "understanding_fallback": FALLBACK_WARNING in u.get("warnings", []),
+        "classifier": u.get("classifier"),  # "rules" | "llm" | "none"
+        "llm_classifier_called": "llm_classification_ms" in result.timings_ms,
+        "llm_classifier_fallback": any(w.startswith("llm_classifier_") for w in u.get("warnings", [])),  # called, but the rules' result was kept
         "retrieval_query_count": 1,  # one search query today; multi-query retrieval is a deferred item
         "retrieval_result_count": result.retrieval_result_count,
         "retrieval_fallback_used": False,  # reserved for multi-query retrieval's raw-query fallback
-        "timings_ms": result.timings_ms,  # includes normalization_ms, classification_ms, understand_ms, retrieve/rerank, generate, total
+        "timings_ms": result.timings_ms,  # includes normalization_ms, classification_ms, llm_classification_ms (only when the LLM classifier ran), understand_ms, retrieve/rerank, generate, total
         "total_wall_ms": wall_ms,
     }
     os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)

@@ -40,3 +40,11 @@ QUERY_UNDERSTANDING_ENABLED = os.environ.get("QUERY_UNDERSTANDING_ENABLED", "tru
 QUERY_VOCABULARY_PATH = os.environ.get(
     "QUERY_VOCABULARY_PATH", os.path.join(os.path.dirname(__file__), "retrieval", "query_vocabulary.json")
 )
+
+# Optional LLM fallback for the intent classifier (retrieval/query_understanding/
+# llm_classifier.py): when the rules can't tell what a question is about, one
+# short call to a small non-reasoning model classifies it. Off by default;
+# any failure or timeout keeps the rules' result, so it can never block a request.
+QUERY_LLM_CLASSIFIER_ENABLED = os.environ.get("QUERY_LLM_CLASSIFIER_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
+QUERY_LLM_CLASSIFIER_MODEL = os.environ.get("QUERY_LLM_CLASSIFIER_MODEL", "openai/gpt-4o-mini")
+QUERY_LLM_CLASSIFIER_TIMEOUT_S = float(os.environ.get("QUERY_LLM_CLASSIFIER_TIMEOUT_S", "3"))

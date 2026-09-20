@@ -9,13 +9,15 @@ is the untouched original and whose intent/role are unknown/unclear. The
 chatbot keeps working exactly as it did before this stage existed -- it must
 never be blocked by query understanding.
 
-A future LLM classifier (deferred, see the plan) plugs in here behind its own
-flag: it would only be consulted when `classify()` is unsure, and a failure
-or timeout would land in the same fallback path.
+The optional LLM classifier (llm_classifier.py) plugs in here behind its own
+flag (QUERY_LLM_CLASSIFIER_ENABLED, default off): it is consulted only when
+`classify()` returns `unknown`, and a failure, timeout or low-confidence
+answer simply keeps the rules' result.
 """
 import logging
 import time
 
+from retrieval.query_understanding import llm_classifier
 from retrieval.query_understanding.normalize import normalize_query
 from retrieval.query_understanding.rules import classify
 from retrieval.query_understanding.schema import ApiRole, QueryUnderstandingResult
@@ -35,6 +37,36 @@ def _flag_enabled() -> bool:
         return bool(getattr(config, "QUERY_UNDERSTANDING_ENABLED", True))
     except Exception:
         return True
+
+
+def _llm_flag_enabled() -> bool:
+    try:
+        import config
+
+        return bool(getattr(config, "QUERY_LLM_CLASSIFIER_ENABLED", False))
+    except Exception:
+        return False
+
+
+def _refine_with_llm(classification, normalized_query, vocab, llm, timings):
+    """Ask the model only when the rules came back `unknown`. Returns
+    (classification, classifier_name, extra_warnings). Never raises: every
+    failure keeps the rules' result and leaves a warning saying why."""
+    if not llm_classifier.needs_llm(classification, normalized_query):
+        return classification, "rules", ()
+    start = time.perf_counter()
+    try:
+        verdict = llm(normalized_query, classification.entities)
+        merged = llm_classifier.merge_verdict(classification, verdict, vocab)
+    except Exception as exc:  # LlmClassifierError, or anything an injected classifier raises
+        logger.warning("LLM classifier failed; keeping the rules' result: %s", exc)
+        return classification, "rules", ("llm_classifier_failed",)
+    finally:
+        if timings is not None:
+            timings["llm_classification_ms"] = round((time.perf_counter() - start) * 1000, 2)
+    if merged is None:
+        return classification, "rules", ("llm_classifier_not_confident",)
+    return merged, "llm", ()
 
 
 def _vocabulary_usable(vocab: Vocabulary) -> bool:
@@ -71,13 +103,19 @@ def understand_query(
     corpus_vocab=None,
     enabled: bool | None = None,
     timings: dict | None = None,
+    llm_enabled: bool | None = None,
+    llm=None,
 ) -> QueryUnderstandingResult:
     """`role` is the signed-in session's role (used only to report partner_type).
     `corpus_vocab` is an optional set -- or a zero-argument callable returning
     one -- of extra known-good words (the corpus-derived vocabulary) that typo
     correction may correct TO; injected so this module never touches the database.
     If a `timings` dict is passed it is filled with `normalization_ms` and
-    `classification_ms` (for the request log)."""
+    `classification_ms` (for the request log).
+    `llm_enabled` (default: QUERY_LLM_CLASSIFIER_ENABLED) turns the optional
+    LLM fallback on; `llm` is the callable it uses, `(question, entities) ->
+    LlmVerdict`, injected so tests never touch the network (default: one call
+    to the configured small model)."""
     if enabled is None:
         enabled = _flag_enabled()
     if not enabled:
@@ -105,6 +143,12 @@ def understand_query(
         if timings is not None:
             timings["classification_ms"] = round((time.perf_counter() - t_cls) * 1000, 2)
 
+        classifier, llm_warnings = "rules", ()
+        if _llm_flag_enabled() if llm_enabled is None else llm_enabled:
+            classification, classifier, llm_warnings = _refine_with_llm(
+                classification, normalization.normalized, vocab, llm or llm_classifier.classify_with_llm, timings
+            )
+
         return QueryUnderstandingResult(
             original_query=query,
             normalized_query=normalization.normalized,
@@ -122,7 +166,8 @@ def understand_query(
             ambiguity=classification.ambiguity,
             clarifying_question=classification.clarifying_question,
             confidence=classification.confidence,
-            warnings=normalization.warnings,
+            warnings=normalization.warnings + llm_warnings,
+            classifier=classifier,
         )
     except Exception:
         # Deliberately broad: whatever broke, the user's question still gets answered from the raw text.

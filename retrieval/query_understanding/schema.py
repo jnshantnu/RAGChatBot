@@ -75,6 +75,7 @@ class QueryUnderstandingResult:
     clarifying_question: str | None = None
     confidence: float = 0.0
     warnings: tuple[str, ...] = ()
+    classifier: str = "rules"  # who decided intent/api_role: "rules", "llm" (the optional fallback), or "none" (stage bypassed)
 
     def __post_init__(self):
         # Coerce plain strings (e.g. from JSON) to the enums; anything that
@@ -83,6 +84,8 @@ class QueryUnderstandingResult:
         object.__setattr__(self, "api_role", ApiRole(self.api_role))
         if not 0.0 <= self.confidence <= 1.0:
             raise ValueError(f"QueryUnderstandingResult.confidence must be within 0..1, got {self.confidence}")
+        if self.classifier not in ("rules", "llm", "none"):
+            raise ValueError(f"QueryUnderstandingResult.classifier must be rules|llm|none, got {self.classifier!r}")
         object.__setattr__(self, "entities", tuple(self.entities))
         object.__setattr__(self, "expansion_terms", tuple(self.expansion_terms)[:MAX_EXPANSION_TERMS])
         object.__setattr__(self, "corrected_terms", tuple(self.corrected_terms))
@@ -96,7 +99,7 @@ class QueryUnderstandingResult:
         warnings = (FALLBACK_WARNING,) + ((warning,) if warning else ())
         return cls(
             original_query=original_query, normalized_query=original_query, retrieval_query=original_query,
-            intent=Intent.UNKNOWN, api_role=ApiRole.UNCLEAR, confidence=0.0, warnings=warnings,
+            intent=Intent.UNKNOWN, api_role=ApiRole.UNCLEAR, confidence=0.0, warnings=warnings, classifier="none",
         )
 
     @property
@@ -126,4 +129,5 @@ class QueryUnderstandingResult:
             "corrected_terms_count": sum(1 for t in self.corrected_terms if t.reason == "typo"),
             "warnings_count": len(self.warnings),
             "fallback": self.is_fallback,
+            "classifier": self.classifier,
         }
