@@ -53,6 +53,31 @@ If the numbered chunks don't contain enough information to answer -- even \
 after allowing for format translation -- reply exactly: "I don't have that \
 information."
 
+Earlier turns in this conversation may be shown below, before the context. \
+Use them ONLY to resolve what the user is referring to (e.g. "idea #1" \
+meaning something you listed earlier) -- never as a source of facts. Every \
+fact in your answer must still come from the numbered context given for \
+THIS question, even when the question is a follow-up. If resolving the \
+reference still leaves you without enough grounded information to answer, \
+say so exactly as instructed above -- do not answer from what you said \
+earlier alone.
+
+A "Query understanding" block may appear before the context. The user's \
+ORIGINAL question is authoritative: the normalized wording, the intent and the \
+API role are only retrieval aids and can be wrong -- never change what the user \
+actually asked (for example never turn "consume" into "implement" or "expose"). \
+When the API role is consumes_platform_api, state your interpretation first: \
+"Assuming you mean APIs your application calls from our platform...". When it is \
+exposes_partner_api, state it first: "Assuming you mean an API or webhook your \
+system exposes...". When the block says the question is ambiguous and the \
+context does not decisively settle which meaning is intended, ask the clarifying \
+question given there BEFORE recommending any specific API; you may add a brief, \
+clearly separated summary of each path only if the context supports both. If the \
+context supports only PART of what was asked, answer that part, say plainly what \
+information is missing, and ask one concise clarifying question only if the missing \
+piece is something the user could supply. (If the context supports none of it, the \
+exact reply above still applies.)
+
 The user's session role is given below, before the context. When asked what \
 is available to the user (e.g. "what APIs are available to me"), answer only \
 for that specific role -- list ONLY the items the context confirms that role \
@@ -79,12 +104,57 @@ def _build_context_block(chunks: list[FusedResult]) -> str:
     return "\n\n".join(lines)
 
 
-def _messages(query: str, citable_chunks: list[FusedResult], role: str) -> list[dict]:
-    # Assemble the user-turn prompt: session role, then numbered citable
-    # context, then the question. The role is what lets the model resolve
-    # "me" in a question like "which APIs are available to me" -- see the
-    # module docstring for why ACL alone can't do this.
-    user_prompt = f"Session role: {role}\n\nContext:\n{_build_context_block(citable_chunks)}\n\nQuestion: {query}"
+def _strip_citations(text: str) -> str:
+    # A prior turn's [N] markers referred to THAT turn's own numbered
+    # context, which no longer exists -- this turn's context is renumbered
+    # from 1 again (see _build_context_block), so an old [3] left sitting
+    # next to a new, unrelated [3] would look like it's citing the new
+    # context. Stripped before history ever reaches the prompt.
+    return re.sub(r"\s*\[\d+\]", "", text)
+
+
+def _build_history_block(history: list[dict] | None) -> str:
+    if not history:
+        return ""
+    turns = []
+    for turn in history:
+        turns.append(f"User: {turn['query']}\nAssistant: {_strip_citations(turn['answer'])}")
+    return "Earlier in this conversation:\n" + "\n\n".join(turns) + "\n\n"
+
+
+def _build_understanding_block(understanding) -> str:
+    """The query-understanding stage's verdict, shown to the model as a hint.
+    Left out when the stage fell back (it decided nothing) -- an all-unknown
+    block would just be noise. Original wording comes first and is labelled
+    authoritative; see SYSTEM_PROMPT for how the model is told to use this."""
+    if understanding is None or understanding.is_fallback:
+        return ""
+    lines = ["Query understanding (retrieval aid -- the original question is authoritative):",
+             f"- Original question: {understanding.original_query}"]
+    if understanding.normalized_query != understanding.original_query:
+        lines.append(f"- Normalized wording: {understanding.normalized_query}")
+    lines += [f"- Intent: {understanding.intent.value}", f"- API role: {understanding.api_role.value}",
+              f"- Ambiguous: {'yes' if understanding.ambiguity else 'no'}"]
+    if understanding.ambiguity and understanding.clarifying_question:
+        lines.append(f"- Clarifying question: {understanding.clarifying_question}")
+    return "\n".join(lines) + "\n\n"
+
+
+def _messages(
+    query: str, citable_chunks: list[FusedResult], role: str, history: list[dict] | None = None, understanding=None
+) -> list[dict]:
+    # Assemble the user-turn prompt: session role, then (if this is a
+    # follow-up) earlier turns for reference resolution only, then this
+    # turn's own numbered citable context, then the question. The role is
+    # what lets the model resolve "me" in a question like "which APIs are
+    # available to me" -- see the module docstring for why ACL alone can't
+    # do this.
+    user_prompt = (
+        f"Session role: {role}\n\n"
+        f"{_build_history_block(history)}"
+        f"{_build_understanding_block(understanding)}"
+        f"Context:\n{_build_context_block(citable_chunks)}\n\nQuestion: {query}"
+    )
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": user_prompt},
@@ -114,16 +184,20 @@ def finalize_answer(answer_text: str, citable_chunks: list[FusedResult]) -> Gene
     )
 
 
-def generate_answer(query: str, citable_chunks: list[FusedResult], role: str) -> GeneratedAnswer:
+def generate_answer(
+    query: str, citable_chunks: list[FusedResult], role: str, history: list[dict] | None = None, understanding=None
+) -> GeneratedAnswer:
     response = _client.chat.completions.create(
         model=config.OPENROUTER_CHAT_MODEL,
-        messages=_messages(query, citable_chunks, role),
+        messages=_messages(query, citable_chunks, role, history, understanding),
         temperature=0,
     )
     return finalize_answer(response.choices[0].message.content or "", citable_chunks)
 
 
-def stream_answer(query: str, citable_chunks: list[FusedResult], role: str):
+def stream_answer(
+    query: str, citable_chunks: list[FusedResult], role: str, history: list[dict] | None = None, understanding=None
+):
     """Same request as generate_answer, but yields the answer's text as the model
     writes it instead of returning it all at once. Total generation time is the
     same; what changes is that the first words are available almost
@@ -131,7 +205,7 @@ def stream_answer(query: str, citable_chunks: list[FusedResult], role: str):
     finalize_answer() afterward for citation verification."""
     stream = _client.chat.completions.create(
         model=config.OPENROUTER_CHAT_MODEL,
-        messages=_messages(query, citable_chunks, role),
+        messages=_messages(query, citable_chunks, role, history, understanding),
         temperature=0,
         stream=True,
     )

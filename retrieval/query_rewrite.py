@@ -50,11 +50,22 @@ import threading
 from dataclasses import dataclass, field
 
 import psycopg
-from rapidfuzz import fuzz, process
+from rapidfuzz import fuzz
 
 import config
+from retrieval.query_understanding import protected
+from retrieval.query_understanding.normalize import correct_typos
+from retrieval.query_understanding.vocabulary import close_under_plural, get_vocabulary
 
-FUZZY_THRESHOLD = 85
+# The word lists below used to be hardcoded in this file; they now live in
+# retrieval/query_vocabulary.json ("legacy_rewriter" section) so owners can edit
+# them without code -- see docs/query-understanding.md. (If that file is
+# unreadable, get_vocabulary() logs an ERROR and these lists come back empty:
+# the rules simply don't fire, they never crash a request.)
+_VOCAB = get_vocabulary()
+_LEGACY = _VOCAB.legacy
+
+FUZZY_THRESHOLD = _VOCAB.typo_high_confidence
 
 # Synonym normalization: informal/technical terms partners use in place of
 # "APIs" -- corpus-grounded (checked actual frequency in RAG-KB-Documents
@@ -63,18 +74,18 @@ FUZZY_THRESHOLD = 85
 # Multi-word phrases are matched exactly (typos spanning a whole phrase are
 # rare and unreliable to fuzzy-match token-by-token); single words are
 # fuzzy-matched, since that's where a typo like "servces" actually occurs.
-_SYNONYM_PHRASES = ["Partner WebServices", "web services", "web service"]
-_SYNONYM_WORDS = ["services", "service", "PWS", "endpoints", "endpoint"]
+_SYNONYM_PHRASES = list(_LEGACY.get("synonym_phrases", ()))
+_SYNONYM_WORDS = list(_LEGACY.get("synonym_words", ()))
 
 # Curated bare-term list: standalone terms that are genuinely ambiguous as a
 # query on their own, expanded into a real question instead of left as-is.
 # Deliberately a fixed, reviewed list -- not a general "looks like a term"
 # heuristic -- so it stays predictable and only catches what's been checked.
-_BARE_TERMS = ["Co-Term", "True-up", "Term Switch", "NxM", "NBE", "Agency Model", "Buy Sell"]
+_BARE_TERMS = list(_LEGACY.get("bare_terms", ()))
 
 _SELF_REFERENCE = re.compile(r"\b(me|my|i)\b", re.IGNORECASE)
 _AVAILABILITY_PHRASES = re.compile(r"\bcan i use\b|\bdo i have\b", re.IGNORECASE)
-_AVAILABILITY_WORDS = ["available", "access", "accessible"]
+_AVAILABILITY_WORDS = list(_LEGACY.get("availability_words", ()))
 
 _ROLE_LABELS = {
     "reseller": "Reseller", "distributor": "Distributor",
@@ -94,7 +105,7 @@ _ALREADY_HANDLED_WORDS = {
 # Corpus-derived vocabulary size/precision knobs -- see the module docstring
 # for why this exists (the "authenication" case) and why it's built from the
 # corpus rather than hand-curated like the lists above.
-_VOCAB_MIN_WORD_LEN = 5     # same reasoning as _fuzzy_match's length guard, one notch stricter since these terms aren't individually reviewed
+_VOCAB_MIN_WORD_LEN = _VOCAB.typo_min_word_length     # same reasoning as _fuzzy_match's length guard, one notch stricter since these terms aren't individually reviewed
 _VOCAB_MAX_DOC_FRACTION = 0.35  # drop boilerplate that's in more than ~1/3 of documents (e.g. "partner"/"autodesk"/"manual" show up in 16-20 of this corpus's 21 docs; real topic words like "authentication"/"subscriptions" show up in a handful)
 
 # Hand-added verb-form companions, same curated-exception philosophy as
@@ -108,7 +119,7 @@ _VOCAB_MAX_DOC_FRACTION = 0.35  # drop boilerplate that's in more than ~1/3 of d
 # 85 threshold, correctly -- they really are different words) and 0 against
 # nothing, since "authenticate" wasn't in the vocabulary at all to score
 # against. Extend this set if another noun/verb split like this is observed.
-_VOCAB_MORPHOLOGICAL_EXTRAS = {"authenticate", "authenticating", "authenticated"}
+_VOCAB_MORPHOLOGICAL_EXTRAS = set(_LEGACY.get("morphological_extras", ()))  # from query_vocabulary.json
 
 _domain_vocab: set[str] | None = None
 _domain_vocab_lock = threading.Lock()  # mirrors retrieval/rerank.py's _load_lock: lazy, one-time-per-process, safe if two requests race the first build
@@ -155,10 +166,7 @@ def _build_domain_vocab() -> set[str]:
     # typed "business model?" was rewritten to "business models?"). Adding
     # both forms once either passes means an exact match always wins before
     # fuzzy correction even runs.
-    closed = set(vocab)
-    for w in vocab:
-        closed.add(w[:-1] if w.endswith("s") and len(w) - 1 >= _VOCAB_MIN_WORD_LEN else w + "s")
-    return closed | _VOCAB_MORPHOLOGICAL_EXTRAS
+    return close_under_plural(vocab, _VOCAB_MIN_WORD_LEN) | _VOCAB_MORPHOLOGICAL_EXTRAS
 
 
 def _get_domain_vocab() -> set[str]:
@@ -170,44 +178,33 @@ def _get_domain_vocab() -> set[str]:
     return _domain_vocab
 
 
+def get_domain_vocab() -> set[str]:
+    """Public accessor (chat.py hands this to the query-understanding stage so
+    its typo correction can use the same corpus-derived vocabulary)."""
+    return _get_domain_vocab()
+
+
 def _correct_vocabulary(query: str) -> tuple[str, bool]:
     """Fuzzy-corrects a typo'd word to its exact spelling in the corpus-
-    derived vocabulary -- e.g. "authenication" -> "authentication". Only
-    acts when exactly one vocabulary word clears FUZZY_THRESHOLD (using
-    rapidfuzz's own top-N search, not a hand-rolled loop); an ambiguous
-    match (two+ words tie above threshold) is left alone rather than guessed
-    at, same conservative stance as the other rules in this file.
+    derived vocabulary -- e.g. "authenication" -> "authentication". The
+    matching logic (single-hit-or-clear-lead, score threshold) lives in
+    retrieval/query_understanding/normalize.py:correct_typos, shared with the
+    new normalization stage so there is exactly one implementation.
+
+    Protected spans (URLs, endpoint paths, code, error codes, IDs, version
+    strings, known API names) are masked out first: before this, the
+    corrector ran over EVERY letter-run in the query, including the inside of
+    a URL or code snippet.
     """
     vocab = _get_domain_vocab()
     if not vocab:
         return query, False
-    vocab_list = list(vocab)
-    changed = False
-
-    def _replace_word(match: re.Match) -> str:
-        nonlocal changed
-        word = match.group(0)
-        if len(word) < _VOCAB_MIN_WORD_LEN or word.lower() in vocab:
-            return word  # already correct, or too short to fuzzy-match safely
-        hits = process.extract(word.lower(), vocab_list, scorer=fuzz.ratio, score_cutoff=FUZZY_THRESHOLD, limit=2)
-        # A single-letter-typo'd plural routinely scores >=85 against BOTH
-        # its singular and plural vocabulary forms ("subscritpions" hits
-        # "subscriptions" 92.3 and "subscription" 88.0) -- a bare "more than
-        # one hit" check would refuse to correct that, even though the top
-        # hit is clearly right. Empirically, the correct candidate always
-        # led the runner-up by >=3.9 points across every collision checked
-        # (subscription/s, account/s, distributor/s); a genuinely ambiguous
-        # pair of unrelated words scoring this close together hasn't been
-        # observed, so a margin requirement resolves the common case without
-        # reopening the "apsi" false-positive risk this file's threshold was
-        # originally tuned against.
-        if hits and (len(hits) == 1 or hits[0][1] - hits[1][1] >= 3):
-            changed = True
-            return hits[0][0]
-        return word
-
-    corrected = re.sub(r"[a-zA-Z]+", _replace_word, query)
-    return corrected, changed
+    masked, originals = protected.mask(query, _VOCAB)
+    corrected, corrections, _warnings = correct_typos(
+        masked, vocab, min_word_length=_VOCAB_MIN_WORD_LEN, high_confidence=FUZZY_THRESHOLD,
+        warn_threshold=FUZZY_THRESHOLD, margin=_VOCAB.typo_margin,
+    )
+    return protected.unmask(corrected, originals), bool(corrections)
 
 
 def _fuzzy_match(word: str, targets: list[str], threshold: int = FUZZY_THRESHOLD) -> bool:
@@ -302,6 +299,16 @@ def _needs_role_injection(query: str) -> bool:
 
 
 def _normalize_synonyms(query: str) -> tuple[str, bool]:
+    # Structural spans only (URLs, paths, code, ids, versions) are shielded:
+    # without this, "/v1/endpoint/status" had its "endpoint" swapped for
+    # "APIs". Product-name words (WebServices, PWS) are deliberately NOT
+    # shielded -- this rule exists to rewrite exactly those.
+    masked, originals = protected.mask(query, _VOCAB, include_names=False)
+    result, changed = _normalize_synonyms_masked(masked)
+    return protected.unmask(result, originals), changed
+
+
+def _normalize_synonyms_masked(query: str) -> tuple[str, bool]:
     changed = False
     result = query
     # Multi-word phrases first, exact match. Each pattern also consumes an
@@ -333,7 +340,10 @@ def _normalize_synonyms(query: str) -> tuple[str, bool]:
     return result, changed
 
 
-def rewrite_query(query: str, role: str) -> RewriteResult:
+def rewrite_query(query: str, role: str, vocab_correction: bool = True) -> RewriteResult:
+    """`vocab_correction=False` skips Rule 0 -- chat.py passes it when the
+    query-understanding stage already ran typo correction on this text, so the
+    same words aren't corrected twice (and the audit trail stays in one place)."""
     rules_applied = []
     working = query
 
@@ -341,9 +351,10 @@ def rewrite_query(query: str, role: str) -> RewriteResult:
     # unconditionally (like Rule 3 below), since it's general spelling
     # cleanup that every other rule's own matching should see the benefit
     # of, not a rule that competes with them for which one gets to fire.
-    working, vocab_changed = _correct_vocabulary(working)
-    if vocab_changed:
-        rules_applied.append("vocabulary_correction")
+    if vocab_correction:
+        working, vocab_changed = _correct_vocabulary(working)
+        if vocab_changed:
+            rules_applied.append("vocabulary_correction")
 
     # Rule 1: bare-term expansion. Checked first and exclusively (elif below)
     # -- a bare term like "Co-Term" wouldn't match rule 2's trigger anyway,

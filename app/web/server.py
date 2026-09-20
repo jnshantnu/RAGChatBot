@@ -16,6 +16,7 @@ import dataclasses
 import json
 import os
 import time
+import uuid
 
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
@@ -23,6 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from chat import ChatResponse, prepare_answer
+from retrieval.query_understanding import FALLBACK_WARNING
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 LOG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "logs", "requests.jsonl")
@@ -37,25 +39,51 @@ PIPELINE_MODE = "parallel"
 app = FastAPI()
 
 
+class HistoryTurn(BaseModel):
+    query: str
+    answer: str
+
+
 class ChatRequest(BaseModel):
     query: str
     role: str
     partner: str
+    # Prior turns from this browser session, same role/partner only (the
+    # frontend filters before sending -- see app.js's runQuery). Used so a
+    # follow-up like "as shown in Dashboard idea#1" can be resolved at all;
+    # see chat.py's module docstring for how retrieval and generation each
+    # use it differently.
+    history: list[HistoryTurn] = []
 
 
-def _log_request(req: ChatRequest, result: ChatResponse, wall_ms: float) -> None:
+def _log_request(req: ChatRequest, result: ChatResponse, wall_ms: float, request_id: str) -> None:
     # Same lightweight observability app/streamlit_app.py's log_request()
     # wrote: one JSON line per request, excluding answer text/citations/
     # scores. Stands in for the OpenTelemetry->Langfuse tracing a production
-    # system would use.
+    # system would use. The query-understanding fields below are counts and
+    # categories only -- no additional user text beyond the `query` this log
+    # already recorded before that stage existed.
+    u = result.understanding or {}
+    terms = u.get("corrected_terms", [])
     log_line = {
+        "request_id": request_id,  # correlation id: also sent to the browser in the first SSE event
         "query": req.query,
         "role": req.role,
         "partner": req.partner,
         "abstained": result.abstained,
         "permission_refused": result.permission_refused,
         "degraded_rerank": result.degraded_rerank,
-        "timings_ms": result.timings_ms,
+        "intent": u.get("intent"),
+        "api_role": u.get("api_role"),
+        "ambiguity": u.get("ambiguity"),
+        "clarification": result.clarification,
+        "normalization_count": len(terms),
+        "corrected_terms_count": sum(1 for t in terms if t.get("reason") == "typo"),
+        "understanding_fallback": FALLBACK_WARNING in u.get("warnings", []),
+        "retrieval_query_count": 1,  # one search query today; multi-query retrieval is a deferred item
+        "retrieval_result_count": result.retrieval_result_count,
+        "retrieval_fallback_used": False,  # reserved for multi-query retrieval's raw-query fallback
+        "timings_ms": result.timings_ms,  # includes normalization_ms, classification_ms, understand_ms, retrieve/rerank, generate, total
         "total_wall_ms": wall_ms,
     }
     os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
@@ -77,13 +105,15 @@ def _stream_chat(req: ChatRequest):
     # automatically, so this never blocks the event loop despite not using
     # async/await anywhere in the pipeline.
     t0 = time.perf_counter()
-    yield _sse("status", {"phase": "retrieving"})
+    request_id = uuid.uuid4().hex[:12]
+    yield _sse("status", {"phase": "retrieving", "request_id": request_id})
 
-    prepared = prepare_answer(req.query, req.role, req.partner, mode=PIPELINE_MODE)
+    history = [{"query": h.query, "answer": h.answer} for h in req.history]
+    prepared = prepare_answer(req.query, req.role, req.partner, mode=PIPELINE_MODE, history=history)
 
     if isinstance(prepared, ChatResponse):
         # Permission refusal or confidence-gate abstain -- nothing to stream.
-        _log_request(req, prepared, round((time.perf_counter() - t0) * 1000, 1))
+        _log_request(req, prepared, round((time.perf_counter() - t0) * 1000, 1), request_id)
         yield _sse("final", dataclasses.asdict(prepared))
         return
 
@@ -94,7 +124,7 @@ def _stream_chat(req: ChatRequest):
         yield _sse("delta", {"text": delta})
 
     result = prepared.finish()
-    _log_request(req, result, result.timings_ms["total_ms"])
+    _log_request(req, result, result.timings_ms["total_ms"], request_id)
     yield _sse("final", dataclasses.asdict(result))
 
 

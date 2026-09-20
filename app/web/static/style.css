@@ -202,6 +202,7 @@ h1 { font-size: 26px; font-weight: 600; letter-spacing: 0.3px; }
 .tag { font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 999px; }
 .tag.abstained { background: var(--red); color: #fff; }
 .tag.refused { background: var(--yellow); color: #fff; }
+.tag.clarify { background: var(--cyan); color: #fff; }
 .tag.degraded { background: var(--border); color: var(--text-muted); }
 
 .meta-caption { font-size: 12px; color: var(--text-muted); margin-top: 8px; }

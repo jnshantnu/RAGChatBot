@@ -1,0 +1,4 @@
+# Development / test-only dependencies. Not needed to run the app:
+#   pip install -r requirements-dev.txt   (then: pytest)
+-r requirements.txt
+pytest==8.3.4

@@ -48,8 +48,10 @@ python -m ingest.ingest
 python -m retrieval.cli_test "How do I authenticate to the Partner WebServices API?"
 python -m retrieval.cli_test "Does the platform support Slack notifications?"   # should abstain
 
-# 3. Run the eval harness
+# 3. Run the eval harness (and the automated tests -- `pip install -r requirements-dev.txt` first)
 python -m eval.run_eval
+pytest
+python -m eval.run_understanding_eval    # query-understanding accuracy; add --retrieval for the retrieval comparison
 
 # 4. Start the web UI
 uvicorn app.main:app --reload
@@ -122,7 +124,9 @@ map artifact in detail:
 - **Observability**: one JSON line per request in `logs/requests.jsonl`
   instead of OpenTelemetry spans -> Langfuse. Same information (timings,
   scores, degraded/abstain flags), no tracing infra.
-- **Query rewriter**: not implemented -- queries go straight to embedding.
+- **Query rewriter**: implemented as a rule-based rewriter (`retrieval/query_rewrite.py`) plus a
+  query-understanding stage (`retrieval/query_understanding/`: normalization, protected terms,
+  intent / API-role classification). Deterministic, no LLM call. See `docs/query-understanding.md`.
 - **Reindexing / blue-green**: not implemented -- ingestion re-embeds in place.
 - **Cache lookup**: not implemented (query + index_version + permission key).
 - **Spreadsheet/PPTX ingestion**: not implemented -- PDFs only for now (see

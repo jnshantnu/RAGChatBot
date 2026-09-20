@@ -55,6 +55,21 @@ composer.addEventListener("submit", (e) => {
   runQuery(query, roleSelect.value, partnerSelect.value);
 });
 
+// How many prior turns ride along on a follow-up -- see chat.py's
+// _augment_retrieval_for_history/llm/generate.py's history block for what
+// the backend does with them. Only turns from the SAME role/partner: a
+// distributor's session shouldn't have a reseller turn's content quietly
+// feeding its follow-ups (or vice versa), since the two see different
+// ACL-scoped content by design.
+const HISTORY_TURNS_SENT = 3;
+
+function buildHistoryPayload(role, partner) {
+  return history
+    .filter((t) => t.role === role && t.partner === partner)
+    .slice(-HISTORY_TURNS_SENT)
+    .map((t) => ({ query: t.query, answer: t.response.answer }));
+}
+
 async function runQuery(query, role, partner) {
   composer.querySelector("button").disabled = true;
 
@@ -93,7 +108,7 @@ async function runQuery(query, role, partner) {
     const resp = await fetch("api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query, role, partner }),
+      body: JSON.stringify({ query, role, partner, history: buildHistoryPayload(role, partner) }),
     });
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
@@ -288,6 +303,7 @@ function renderStaticTurn(turn) {
   const tags = [];
   if (r.abstained) tags.push(["abstained", "abstained"]);
   if (r.permission_refused) tags.push(["refused", "permission refused"]);
+  if (r.clarification) tags.push(["clarify", "clarifying question"]);
   if (r.degraded_rerank) tags.push(["degraded", "degraded.rerank"]);
   if (tags.length) {
     const tagsEl = document.createElement("div");

@@ -30,3 +30,13 @@ OPENROUTER_CHAT_MODEL = os.environ.get("OPENROUTER_CHAT_MODEL", "openai/gpt-4o-m
 
 # Where ingest/ingest.py looks for source documents (.pdf and .md files) to ingest.
 CORPUS_DIR = os.path.join(os.path.dirname(__file__), "RAG-KB-Documents")
+
+# Query understanding (retrieval/query_understanding/): normalises the question
+# and classifies its intent / API role before retrieval. Fail-safe by design --
+# set QUERY_UNDERSTANDING_ENABLED=false to bypass it entirely and use the
+# original query as-is (the pre-existing behaviour).
+QUERY_UNDERSTANDING_ENABLED = os.environ.get("QUERY_UNDERSTANDING_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
+# The controlled vocabulary product/program owners edit -- see docs/query-understanding.md.
+QUERY_VOCABULARY_PATH = os.environ.get(
+    "QUERY_VOCABULARY_PATH", os.path.join(os.path.dirname(__file__), "retrieval", "query_vocabulary.json")
+)

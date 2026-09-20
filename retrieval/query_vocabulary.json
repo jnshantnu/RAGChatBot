@@ -1,0 +1,123 @@
+{
+  "_readme": [
+    "Controlled vocabulary for the query-understanding stage (retrieval/query_understanding/).",
+    "Product/program owners can edit this file WITHOUT code changes; restart the app service to reload it.",
+    "The file is validated on load (see retrieval/query_understanding/vocabulary.py). If it is invalid, the app logs an ERROR and falls back to the original, un-normalized query -- it never crashes. tests/test_vocabulary.py also validates this shipped file, so run `pytest` after editing.",
+    "Sections: abbreviations (exact word -> expansion), synonyms (phrase -> canonical phrase), action_concepts / action_verbs (how API-direction questions are recognised), api_nouns, protected_terms and known_apis (never rewritten or 'corrected'), known_programs / partner_types / regions (the only values ever reported as extracted), intent_keywords, clarifying_questions, retrieval, typo_correction, legacy_rewriter (the older rule lists formerly hardcoded in query_rewrite.py).",
+    "Add a new alias: put it under abbreviations or synonyms. Add a new API/program: known_apis / known_programs. See docs/query-understanding.md."
+  ],
+  "version": 1,
+
+  "abbreviations": {
+    "biz": "business",
+    "prog": "program",
+    "int": "integration",
+    "dev": "developer",
+    "docs": "documentation",
+    "doc": "documentation",
+    "auth": "authentication",
+    "onboard": "onboarding",
+    "env": "environment",
+    "config": "configuration"
+  },
+
+  "synonyms": [
+    {"phrase": "trade in", "replacement": "trade-in"},
+    {"phrase": "tradein", "replacement": "trade-in"},
+    {"phrase": "call API", "replacement": "consume API"},
+    {"phrase": "invoke API", "replacement": "consume API"},
+    {"phrase": "use API", "replacement": "consume API", "not_before": ["key", "keys", "token", "tokens", "secret", "secrets", "credentials"]},
+    {"phrase": "integrate with API", "replacement": "consume API"},
+    {"phrase": "publish API", "replacement": "expose API"},
+    {"phrase": "provide API", "replacement": "expose API"},
+    {"phrase": "webhook callback", "replacement": "webhook"}
+  ],
+
+  "action_concepts": {
+    "consume": ["consume API", "call API", "invoke API", "use platform API", "integrate with platform API"],
+    "implement": ["implement API", "build integration", "develop integration", "integrate"],
+    "expose": ["expose API", "publish API", "provide API", "make API available"],
+    "authenticate": ["OAuth", "client credentials", "access token", "API key", "scope", "authorization"]
+  },
+
+  "action_verbs": {
+    "consume": ["consume", "consumes", "consuming", "call", "calls", "calling", "invoke", "invokes", "invoking", "integrate with", "integrating with"],
+    "weak_consume": ["use", "using"],
+    "expose": ["expose", "exposes", "exposing", "publish", "publishes", "publishing", "provide", "provides", "providing"],
+    "implement": ["implement", "implementing", "build", "building", "develop", "developing", "integrate", "integrating"],
+    "authenticate": ["authenticate", "authenticating", "authentication", "authenticated", "authorize", "authorization", "oauth", "token", "tokens", "credential", "credentials", "scope", "scopes", "api key"]
+  },
+
+  "api_nouns": ["api", "apis", "endpoint", "endpoints", "webhook", "webhooks", "pws", "webservices"],
+
+  "protected_terms": [
+    "OAuth", "NxM", "NBE", "PWS", "Buy-Sell", "Co-Term", "True-up", "Term Switch", "Agency Model"
+  ],
+
+  "known_apis": [
+    "Get Subscriptions V1", "Export Subscriptions V1", "Get Opportunity V1", "Export Opportunities V1",
+    "Get Trueup Opportunities", "Update Account", "Update Subscriptions", "Get Part Number", "Get License V3",
+    "GetPartnerDesignation", "Get Insights Metrics v1", "Get My Price", "Place Order", "Get Order Status",
+    "Get Order Details", "Get Order List", "Get Invoice",
+    "Get Subscriptions V2", "Export Subscriptions V2", "Get Opportunity V2", "Export Opportunities V2",
+    "Get Subscription Status", "Update Purchaser", "Get Insights Metrics V2", "Create Quote v3", "Get Quote Status",
+    "Get Quote Details v3", "Finalize Quote", "Get Quote List", "Update Quote v3", "Quote Send Email",
+    "Cancel Quote", "Export Promotions", "Export Quotes", "Export Product Catalog",
+    "Get Account", "Export Accounts", "Search Account", "Get Sales Opportunity", "Get Teams", "Export Usage",
+    "Export Bulk Usage",
+    "Subscription Change", "Quote Status change", "Product Catalog", "Subscription Payment"
+  ],
+
+  "known_programs": [
+    {"name": "Buy-Sell", "aliases": ["buy sell", "buy-sell", "buysell"]},
+    {"name": "NxM", "aliases": ["nxm", "nbe", "agency model", "nbe / nxm / agency model"]}
+  ],
+
+  "partner_types": {
+    "reseller": "Reseller",
+    "distributor": "Distributor",
+    "solution provider": "Solution Provider",
+    "principal": "Principal"
+  },
+
+  "regions": ["India", "Mexico", "Brazil", "South America", "Indonesia", "Vietnam", "Eastern Europe", "Middle East", "Africa"],
+
+  "intent_keywords": {
+    "troubleshooting": ["error*", "fail*", "not working", "doesn't work", "does not work", "exception", "timeout", "timed out", "times out", "status code"],
+    "program_eligibility": ["eligib*", "qualif*", "entitle*"],
+    "onboarding": ["onboard*", "get started", "getting started", "sign up", "register", "registration", "set up", "setup", "enroll*"],
+    "business_model": ["business model", "buy-sell", "buy sell", "nxm", "nbe", "agency model", "channel model", "two-tier", "who pays"],
+    "program_policy": ["policy", "policies", "rule*", "terms", "requirement*", "program", "allowed", "permitted", "restrict*", "tier"],
+    "api_discovery": ["which api*", "what api*", "available", "list of api*", "list api*", "supported api*", "api catalog", "catalog"]
+  },
+
+  "clarifying_questions": {
+    "api_direction": "Are you looking to call our platform APIs from your application, or publish an API/webhook for our platform to call?"
+  },
+
+  "retrieval": {
+    "append_role_phrase": false,
+    "role_phrases": {
+      "consumes_platform_api": "platform APIs that partners consume",
+      "exposes_partner_api": "partner API or webhook that the partner exposes"
+    }
+  },
+
+  "typo_correction": {
+    "min_word_length": 5,
+    "high_confidence": 85,
+    "warn_threshold": 78,
+    "margin": 3,
+    "warn_min_word_length": 7
+  },
+
+  "legacy_rewriter": {
+    "synonym_to_apis": {
+      "phrases": ["Partner WebServices", "web services", "web service"],
+      "words": ["services", "service", "PWS", "endpoints", "endpoint"]
+    },
+    "bare_terms": ["Co-Term", "True-up", "Term Switch", "NxM", "NBE", "Agency Model", "Buy Sell"],
+    "availability_words": ["available", "access", "accessible"],
+    "morphological_extras": ["authenticate", "authenticating", "authenticated"]
+  }
+}
