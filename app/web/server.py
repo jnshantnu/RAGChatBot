@@ -83,9 +83,9 @@ def _log_request(req: ChatRequest, result: ChatResponse, wall_ms: float, request
         "classifier": u.get("classifier"),  # "rules" | "llm" | "none"
         "llm_classifier_called": "llm_classification_ms" in result.timings_ms,
         "llm_classifier_fallback": any(w.startswith("llm_classifier_") for w in u.get("warnings", [])),  # called, but the rules' result was kept
-        "retrieval_query_count": 1,  # one search query today; multi-query retrieval is a deferred item
+        "retrieval_query_count": 1,  # always one search query (multi-query retrieval was tried and removed; see docs/query-understanding.md)
         "retrieval_result_count": result.retrieval_result_count,
-        "retrieval_fallback_used": False,  # reserved for multi-query retrieval's raw-query fallback
+        "retrieval_fallback_used": False,  # always False; kept so the log schema stays stable
         "timings_ms": result.timings_ms,  # includes normalization_ms, classification_ms, llm_classification_ms (only when the LLM classifier ran), understand_ms, retrieve/rerank, generate, total
         "total_wall_ms": wall_ms,
     }

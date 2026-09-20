@@ -230,12 +230,30 @@ fixture vocabularies for those), plus real-corpus questions: `authenication`
 typos, "which APIs can I use", `Get Account` / `Get Subscriptions V1`
 consumption, webhook publication, Buy-Sell vs NxM, troubleshooting phrasing.
 
+## Tried and rejected: multi-query retrieval
+
+Built, measured, and removed. The idea: also search a second query, the normalized
+question plus its `expansion_terms`, fuse the result lists with RRF, and let the
+reranker and confidence gate read only the clean question.
+
+What the evaluation (golden set + labeled set, real database and embedding API) showed:
+
+* **No measurable gain.** Golden recall@5 and @10 were 14/14 with and without it (the set is saturated, so it could not show a gain anyway); **0** confidence-gate decisions changed; the only score movements came from the always-included `adsk-biz-rules` chunk entering the competitive list, which changes nothing the LLM sees.
+* **Little coverage.** Only 2 of 20 golden and 17 of 32 labeled questions produced an enriched variant at all; most questions have no expansion terms. Many expansion terms are generic (`OAuth`, `access token`, `API key`) and pull in noisy keyword matches.
+* **A real regression in plain RRF.** For "How do I use the API key?" the enriched variant pushed the best auth pages out of the reranker's top-20 candidate pool. Protecting all but the last five slots still lost one: RRF rank predicts relevance poorly enough that a chunk ranked 16th can be the cross-encoder's top pick. Only an *additive* pool (the primary query's own top 20 untouched, plus up to 5 variant-only extras) removed the regression.
+* **A cost.** One more embedding call (this API's p90 is about 10 s) and 5 more rerank pairs; retrieval wall time rose from a median of about 2.6 s to 4.2 s in a noisy run.
+
+Removed because a disabled, unproven feature in the core retrieval path is code to maintain and
+explain for no benefit. **Revisit only with a harder evaluation set** (paraphrased or
+misspelled questions the single query actually misses), and keep the two lessons: rerank on the
+clean question, and never let extra candidates displace the primary query's own.
+
 ## Known limitations
 
 * **Rules first.** Phrasing the rules don't cover is `unknown`/`unclear` unless the optional LLM fallback (above) is switched on. With it on, a model can still be wrong or vary between runs even at temperature 0; on the 13-row fallback set (`eval/llm_classifier_set.json`, rules alone 3/13) it got 8/13 exact, with the misses being a timeout, a low-confidence "stay unknown", a debatable policy-vs-business-model label, and two "implement -> ask which direction" outcomes. Treat that set as a smoke test, not an accuracy claim.
 * **The LLM call is sequential.** It runs before retrieval starts, so on the questions that need it the user waits for it. Running it alongside retrieval would hide that latency (not done).
 * **The labeled set was written alongside the rules**, so 100% on it overstates real accuracy. Grow it with real traffic, and keep some rows unseen when tuning.
-* **Single search query today.** Searching with several query forms (original + enriched) and merging is a planned, separate step; `expansion_terms` are computed and reported but not yet used to widen the search.
+* **Single search query.** `expansion_terms` are computed and reported but not used to widen the search; see "Tried and rejected: multi-query retrieval" below.
 * **Normalization does not restructure grammar.** `which APIs i can implement` becomes `Which APIs I can implement`, not `...can I implement`.
 * Some vocabulary entries are risky by nature (`int`, `dev`, `env`, `auth`, `scope`, `token`). They are exact whole-word matches, but a real user could mean something else; check the evaluation after editing.
 * `auth` expands to `authentication` (not `authorization`) as specified; `scope`/`token` count as authentication cues even in unrelated sentences.
