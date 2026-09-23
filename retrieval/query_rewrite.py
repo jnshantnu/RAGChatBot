@@ -197,7 +197,11 @@ def _correct_vocabulary(query: str) -> tuple[str, bool]:
     a URL or code snippet.
     """
     vocab = _get_domain_vocab()
-    if not vocab:
+    # NOTE: an empty corpus vocabulary does NOT mean there's nothing to correct
+    # -- the short-word allowlist (e.g. "aips" -> "apis") needs no corpus words
+    # at all, only continue past this point when vocab AND the allowlist are
+    # both empty is there truly nothing correct_typos could do.
+    if not vocab and not _VOCAB.typo_short_word_allowlist:
         return query, False
     masked, originals = protected.mask(query, _VOCAB)
     corrected, corrections, _warnings = correct_typos(
@@ -259,15 +263,6 @@ _CODE_REQUEST_RE = re.compile(
 )
 
 
-def _strip_code_request(query: str) -> tuple[str, bool]:
-    match = _CODE_REQUEST_RE.search(query)
-    if not match:
-        return query, False
-    stripped = (query[: match.start()] + query[match.end() :]).strip()
-    stripped = re.sub(r"[.\s]+$", "", stripped).strip()  # drop a dangling "..." the clause left behind
-    return (stripped or query), bool(stripped)
-
-
 # A "based in <region>" clause is written for the LLM, not for retrieval:
 # adding a country/region name to the search text does not help it find the
 # right chunk here -- it actively hurts. Measured on this corpus's own
@@ -294,24 +289,12 @@ def _location_clause_pattern(regions: list[str]) -> "re.Pattern | None":
     alt = "|".join(re.escape(r) for r in sorted(regions, key=len, reverse=True))
     return re.compile(
         rf"[,]*\s*if\s+(?:i(?:'m| am)|we(?:'re| are))\s+(?:based|located)\s+in\s+(?:{alt})\b\.?"
-        rf"|[,]*\s*(?:i(?:'m| am)|we(?:'re| are))\s+(?:based|located)\s+in\s+(?:{alt})\b\.?"
-        rf"|[,]*\s*based\s+in\s+(?:{alt})\b\.?",
+        rf"|[,]*\s*(?:i(?:'m| am)|we(?:'re| are))\s+(?:based|located)\s+in\s+(?:{alt})\b\.?",
         re.IGNORECASE,
     )
 
 
 _LOCATION_CLAUSE_RE = _location_clause_pattern(list(_VOCAB.regions))
-
-
-def _strip_location_clause(query: str) -> tuple[str, bool]:
-    if _LOCATION_CLAUSE_RE is None:
-        return query, False
-    match = _LOCATION_CLAUSE_RE.search(query)
-    if not match:
-        return query, False
-    stripped = (query[: match.start()] + query[match.end() :]).strip()
-    stripped = re.sub(r"[.\s]+$", "", stripped).strip()
-    return (stripped or query), bool(stripped)
 
 
 def _expand_bare_term(query: str) -> str | None:
@@ -452,6 +435,7 @@ def rewrite_query(query: str, role: str, vocab_correction: bool = True) -> Rewri
     retrieval_text = working
     for _, m in sorted(stripped_spans, key=lambda t: t[1].start(), reverse=True):  # rightmost first, so earlier spans keep their indices
         retrieval_text = retrieval_text[: m.start()] + retrieval_text[m.end() :]
+    retrieval_text = re.sub(r"([.!?])\s*,\s*", r"\1 ", retrieval_text)  # an orphaned comma left directly after a sentence end
     retrieval_text = re.sub(r"[.\s]+$", "", retrieval_text).strip()
     if retrieval_text:
         rules_applied += [name for name, _ in stripped_spans]

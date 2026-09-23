@@ -119,3 +119,35 @@ def test_stripping_both_clauses_to_nothing_falls_back_to_the_original():
     query = "give me sample code in Java if I am based in Vietnam"
     r = qr.rewrite_query(query, "reseller")
     assert r.rewritten_query == query and r.rules_applied == []
+
+
+# ── code-review fixes: third-person locations, orphaned punctuation, empty domain vocab ──
+
+def test_a_third_partys_location_is_not_stripped():
+    # only the ASKER's own self-reported location is a retrieval-noise clause;
+    # someone else's "based in <region>" is real content about the question's subject.
+    query = "our regional partner is based in Vietnam, which APIs support that office?"
+    r = qr.rewrite_query(query, "reseller")
+    assert "location_clause_stripped_for_retrieval" not in r.rules_applied
+    assert r.rewritten_query == query
+
+
+def test_stripping_a_mid_sentence_location_clause_leaves_no_orphaned_punctuation():
+    r = qr.rewrite_query("I am based in Vietnam, which APIs can I use?", "reseller")
+    assert ".," not in r.rewritten_query and ". ," not in r.rewritten_query
+    assert r.rewritten_query == "I am a Reseller partner with Autodesk. which APIs can I use?"
+
+
+def test_short_word_allowlist_correction_works_even_with_an_empty_domain_vocabulary(monkeypatch):
+    # the corpus-derived domain vocabulary can be empty (DB unreachable, empty corpus);
+    # the short-word allowlist needs none of it, so it must still fire.
+    monkeypatch.setattr(qr, "_domain_vocab", set())
+    corrected, changed = qr._correct_vocabulary("which aips can I use")
+    assert changed and "apis" in corrected.lower()
+
+
+def test_with_no_domain_vocab_and_no_allowlist_still_returns_unchanged(monkeypatch):
+    import dataclasses
+    monkeypatch.setattr(qr, "_domain_vocab", set())
+    monkeypatch.setattr(qr, "_VOCAB", dataclasses.replace(qr._VOCAB, typo_short_word_allowlist=()))
+    assert qr._correct_vocabulary("which aips can I use") == ("which aips can I use", False)
