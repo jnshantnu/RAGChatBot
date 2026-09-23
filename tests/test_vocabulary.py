@@ -107,3 +107,21 @@ def test_plural_partners_use_real_english_endings_not_fabricated_words(word, exp
 
 def test_plural_partners_respect_the_minimum_length():
     assert vocabulary.plural_partners("apis", 5) == set()
+
+
+@pytest.mark.parametrize("field,value", [
+    ("short_word_allowlist", ["api"]),            # 3 letters collide with real words
+    ("short_word_allowlist", ["ap1s"]),
+    ("short_word_allowlist", "apis"),
+    ("transposition_correction", "yes"),
+])
+def test_bad_typo_settings_are_rejected(field, value):
+    data = copy.deepcopy(shipped_data())
+    data["typo_correction"][field] = value
+    with pytest.raises(VocabularyError, match="typo_correction"):
+        parse_vocabulary(data)
+
+
+def test_shipped_typo_settings(shipped_vocab):
+    assert shipped_vocab.typo_transposition_correction is True
+    assert set(shipped_vocab.typo_short_word_allowlist) == {"apis", "json"}

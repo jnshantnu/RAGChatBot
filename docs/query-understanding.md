@@ -90,7 +90,8 @@ Everything a product/program owner is likely to change is in
 | add keywords for a non-API intent | `intent_keywords` (`stem*` = prefix match) |
 | change the clarifying question | `clarifying_questions.api_direction` |
 | add a region / partner type | `regions` / `partner_types` |
-| tune typo strictness | `typo_correction` (`high_confidence`, `warn_threshold`, `margin`, `warn_min_word_length`) |
+| tune typo strictness | `typo_correction` (`high_confidence`, `warn_threshold`, `margin`, `warn_min_word_length`, `transposition_correction`) |
+| let a short word be the target of a swapped-letter fix | `typo_correction.short_word_allowlist` (4+ letters, e.g. `apis`) |
 
 Matching rules: case-insensitive, whole words, and never inside a hyphenated or
 dotted token (`dev` does not match `dev-ops` or `config.json`). Abbreviations
@@ -156,13 +157,44 @@ vocabulary's own words, known API/program names, and (in the app) the
 corpus-derived vocabulary. Never a generic dictionary -- that is how a
 spellchecker corrupts API names.
 
+Three tiers, tried in this order:
+
+1. **Swapped letters** (`transposition_correction`, on by default). A word of 5+ letters that is a rearrangement of **exactly one** known word, reachable by at most 1 adjacent swap (2 for words of 8+ letters), is corrected: `dahsbaords` -> `dashboards`, `cerate` -> `create`. The plain fuzzy ratio charges two edits for a swap, so these scored 80 and 83 and missed the 85 bar. No letter is added, dropped or replaced, so it can only confuse two real words that are anagrams of each other, and it does nothing if two known words are equally close. Recorded with confidence 0.95.
+2. **Short-word allowlist** (`short_word_allowlist`, default `apis`, `json`). Words under 5 letters are never fuzzy-matched, but one of these listed 4+ letter words may be reached by a single swap: `aips` -> `apis`, `jsno` -> `json`. Only a swap: `apps`, `apix`, `items` and `teams` are never touched. Entries must be 4+ letters.
+3. **Fuzzy ratio**, for one wrong or missing letter in a longer word:
+
 * score >= `high_confidence` (85) and a clear lead over the runner-up -> corrected, recorded in `corrected_terms`;
 * score between `warn_threshold` (78) and 85, or an ambiguous tie -> **left as typed**, recorded in `warnings`;
 * words shorter than 5 letters are never fuzzy-matched, and near-miss *warnings* are only raised for words of 7+ letters (`warn_min_word_length`) -- shorter words collide too easily (`items` vs `teams`);
 * plural/singular pairs are not flagged.
 
-Example: `eligiblity` is corrected to `eligibility` only if an Eligibility
+Example: `what dahsbaords i can cerate using aips?` becomes `What dashboards I can create using apis?`
+(before the swap tiers it scored 0.0000 on every chunk and abstained). Example: `eligiblity` is corrected to `eligibility` only if an Eligibility
 entity is in the vocabulary. In this corpus there isn't one, so it is left alone.
+
+## Location-clause stripping
+
+A "based in <region>" clause is written for the LLM, not for retrieval. Measured
+on this corpus: "which APIs can I use" scores 0.32 against the chunk that answers
+it (the confidence gate needs >= 0.20); adding "if I am based in Vietnam" -- even
+once that chunk was edited to literally contain the word "Vietnam" next to the
+relevant API content -- collapsed the same pair to 0.0002 and the gate abstained.
+The cross-encoder reads an unrecognized-sounding location as a strong "this
+question is about something else" signal, strong enough to outweigh a solid
+topical match. This is a bias in the reranker model, not a missing chunk or a
+missing fact -- region/partner-type stay soft signals (not used to filter or
+re-rank, see "Metadata filters" below), so the search TEXT itself was what hurt.
+
+`retrieval/query_rewrite.py`'s `_strip_location_clause` removes a clause like "if
+I am based in <region>" / "I'm located in <region>" from the RETRIEVAL text only,
+the same pattern already used for a trailing "give me sample code in X" clause
+(see "Retrieval query" below) -- and by the same mechanism: retrieval searches the
+topic alone, generation still gets the full request, so the model still knows the
+user is in Vietnam and can say so. Only fires on a region from the controlled
+vocabulary's `regions` list (never an arbitrary "in <word>"), and both this rule
+and the code-request rule are matched independently against the same text and
+removed together, so a query with both clauses doesn't lose one because the other
+already reduced the leftover text.
 
 ## Retrieval query
 
@@ -258,3 +290,4 @@ clean question, and never let extra candidates displace the primary query's own.
 * Some vocabulary entries are risky by nature (`int`, `dev`, `env`, `auth`, `scope`, `token`). They are exact whole-word matches, but a real user could mean something else; check the evaluation after editing.
 * `auth` expands to `authentication` (not `authorization`) as specified; `scope`/`token` count as authentication cues even in unrelated sentences.
 * Region and program extraction only knows the values listed in the vocabulary; this corpus has no region-tagged content.
+* The location-clause fix only catches the "if I am/we are based in <region>" phrasing that was measured to collapse the reranker score; a bare "in <region>" with no "based"/"located" wasn't found to have the same problem on this corpus and isn't stripped. Other unrecognized-sounding words could plausibly cause the same collapse -- this is a narrow, evidence-driven fix for the one wording pattern that was actually measured, not a general fix for reranker bias against unfamiliar tokens.

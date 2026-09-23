@@ -100,6 +100,8 @@ class Vocabulary:
     typo_warn_threshold: int = 78
     typo_margin: int = 3
     typo_warn_min_word_length: int = 7
+    typo_transposition_correction: bool = True                 # fix swapped-letter typos ("dahsbaords") -- see normalize.correct_typos
+    typo_short_word_allowlist: tuple = ()                      # short (4+ letter) words a swapped-letter typo may be corrected TO ("apis")
     legacy: dict = field(default_factory=dict)                 # the older rewriter lists, see query_rewrite.py
     abbreviation_regex: re.Pattern = field(default=None, compare=False, repr=False)
     protected_name_regex: re.Pattern = field(default=None, compare=False, repr=False)
@@ -243,12 +245,18 @@ def parse_vocabulary(data: dict) -> Vocabulary:
     warn = typo.get("warn_threshold", 78)
     margin = typo.get("margin", 3)
     warn_min_len = typo.get("warn_min_word_length", 7)
+    transposition = typo.get("transposition_correction", True)
+    short_allowlist = typo.get("short_word_allowlist", [])
     if not (isinstance(min_len, int) and min_len >= 3):
         _fail("typo_correction.min_word_length must be an integer >= 3")
     if not (isinstance(high, (int, float)) and isinstance(warn, (int, float)) and 0 <= warn <= high <= 100):
         _fail("typo_correction needs 0 <= warn_threshold <= high_confidence <= 100")
     if not (isinstance(margin, (int, float)) and margin >= 0):
         _fail("typo_correction.margin must be >= 0")
+    if not isinstance(transposition, bool):
+        _fail("typo_correction.transposition_correction must be true or false")
+    if not (isinstance(short_allowlist, list) and all(isinstance(w, str) and w.isalpha() and len(w) >= 4 for w in short_allowlist)):
+        _fail("typo_correction.short_word_allowlist must be a list of words of 4+ letters (shorter words collide with real words)")
     if not (isinstance(warn_min_len, int) and warn_min_len >= min_len):
         _fail("typo_correction.warn_min_word_length must be an integer >= min_word_length")
 
@@ -283,6 +291,7 @@ def parse_vocabulary(data: dict) -> Vocabulary:
         clarifying_questions=_str_map(data, "clarifying_questions"),
         append_role_phrase=bool(retrieval.get("append_role_phrase", False)), role_phrases=dict(role_phrases),
         typo_min_word_length=min_len, typo_high_confidence=high, typo_warn_threshold=warn, typo_margin=margin, typo_warn_min_word_length=warn_min_len,
+        typo_transposition_correction=transposition, typo_short_word_allowlist=tuple(w.lower() for w in short_allowlist),
         legacy=legacy_norm, abbreviation_regex=abbreviation_regex, protected_name_regex=protected_name_regex,
     )
 

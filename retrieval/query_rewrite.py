@@ -203,6 +203,7 @@ def _correct_vocabulary(query: str) -> tuple[str, bool]:
     corrected, corrections, _warnings = correct_typos(
         masked, vocab, min_word_length=_VOCAB_MIN_WORD_LEN, high_confidence=FUZZY_THRESHOLD,
         warn_threshold=FUZZY_THRESHOLD, margin=_VOCAB.typo_margin,
+        transposition=_VOCAB.typo_transposition_correction, short_allowlist=_VOCAB.typo_short_word_allowlist,
     )
     return protected.unmask(corrected, originals), bool(corrections)
 
@@ -264,6 +265,52 @@ def _strip_code_request(query: str) -> tuple[str, bool]:
         return query, False
     stripped = (query[: match.start()] + query[match.end() :]).strip()
     stripped = re.sub(r"[.\s]+$", "", stripped).strip()  # drop a dangling "..." the clause left behind
+    return (stripped or query), bool(stripped)
+
+
+# A "based in <region>" clause is written for the LLM, not for retrieval:
+# adding a country/region name to the search text does not help it find the
+# right chunk here -- it actively hurts. Measured on this corpus's own
+# business-rules content: "which APIs can I use" scores 0.32 against the
+# chunk that actually answers it (rerank/confidence.py's gate needs >=0.20);
+# adding "in Vietnam" -- even once that exact chunk was edited to literally
+# contain the word "Vietnam" -- collapsed the same pair to 0.0002. The
+# cross-encoder reads an unrecognized-sounding location as a strong signal
+# the question is about something else, outweighing a solid topical match on
+# "which APIs can I use" (see docs/query-understanding.md). Region/partner-type
+# are soft signals (item 11 of the plan): extracted and reported, but not (yet)
+# used to filter or re-rank -- so this string, alone, is what was hurting
+# retrieval, not a missing hard filter. Only strips a clause tied to a region
+# from the controlled vocabulary (regions is a short, reviewed list -- see
+# retrieval/query_vocabulary.json), never an arbitrary "in <word>", so it can't
+# accidentally eat unrelated content. Generation still sees the full request
+# (self.generation_query in chat.py never goes through this function), and the
+# understanding stage's `region` field still reaches the prompt separately --
+# nothing about knowing the user is in Vietnam is lost, only removed from the
+# text used to SEARCH.
+def _location_clause_pattern(regions: list[str]) -> "re.Pattern | None":
+    if not regions:
+        return None
+    alt = "|".join(re.escape(r) for r in sorted(regions, key=len, reverse=True))
+    return re.compile(
+        rf"[,]*\s*if\s+(?:i(?:'m| am)|we(?:'re| are))\s+(?:based|located)\s+in\s+(?:{alt})\b\.?"
+        rf"|[,]*\s*(?:i(?:'m| am)|we(?:'re| are))\s+(?:based|located)\s+in\s+(?:{alt})\b\.?"
+        rf"|[,]*\s*based\s+in\s+(?:{alt})\b\.?",
+        re.IGNORECASE,
+    )
+
+
+_LOCATION_CLAUSE_RE = _location_clause_pattern(list(_VOCAB.regions))
+
+
+def _strip_location_clause(query: str) -> tuple[str, bool]:
+    if _LOCATION_CLAUSE_RE is None:
+        return query, False
+    match = _LOCATION_CLAUSE_RE.search(query)
+    if not match:
+        return query, False
+    stripped = (query[: match.start()] + query[match.end() :]).strip()
+    stripped = re.sub(r"[.\s]+$", "", stripped).strip()
     return (stripped or query), bool(stripped)
 
 
@@ -386,9 +433,30 @@ def rewrite_query(query: str, role: str, vocab_correction: bool = True) -> Rewri
     # see _strip_code_request's own comment for why. Runs last, on the fully
     # rewritten text, so generation still benefits from the other rules
     # (typo correction, role injection) even when this one doesn't fire.
-    retrieval_text, code_stripped = _strip_code_request(working)
-    if code_stripped:
-        rules_applied.append("code_request_stripped_for_retrieval")
+    # Both clause-stripping rules are matched independently against the SAME
+    # text and their spans removed together, rather than chaining one strip
+    # into the next: a query with both a code-request clause AND a location
+    # clause ("give me sample code in Java if I am based in Vietnam") would
+    # otherwise have the location clause left as the ENTIRE remaining text
+    # after the code clause was removed, and the "never return an empty
+    # string" safeguard below would then hand back the un-stripped text --
+    # silently undoing the fix for the one query that needed it most.
+    stripped_spans = []
+    code_match = _CODE_REQUEST_RE.search(working)
+    if code_match:
+        stripped_spans.append(("code_request_stripped_for_retrieval", code_match))
+    location_match = _LOCATION_CLAUSE_RE.search(working) if _LOCATION_CLAUSE_RE else None
+    if location_match:
+        stripped_spans.append(("location_clause_stripped_for_retrieval", location_match))
+
+    retrieval_text = working
+    for _, m in sorted(stripped_spans, key=lambda t: t[1].start(), reverse=True):  # rightmost first, so earlier spans keep their indices
+        retrieval_text = retrieval_text[: m.start()] + retrieval_text[m.end() :]
+    retrieval_text = re.sub(r"[.\s]+$", "", retrieval_text).strip()
+    if retrieval_text:
+        rules_applied += [name for name, _ in stripped_spans]
+    else:
+        retrieval_text = working  # stripping everything would leave nothing to search on; keep the original instead
 
     return RewriteResult(
         original_query=query, rewritten_query=retrieval_text, generation_query=working, rules_applied=rules_applied

@@ -108,7 +108,9 @@
     "high_confidence": 85,
     "warn_threshold": 78,
     "margin": 3,
-    "warn_min_word_length": 7
+    "warn_min_word_length": 7,
+    "transposition_correction": true,
+    "short_word_allowlist": ["apis", "json"]
   },
 
   "legacy_rewriter": {

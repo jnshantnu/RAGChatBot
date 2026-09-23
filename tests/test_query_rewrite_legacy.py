@@ -63,3 +63,59 @@ def test_synonym_rule_does_not_touch_urls_or_paths_but_still_rewrites_plain_word
 def test_vocab_correction_can_be_skipped():
     r = qr.rewrite_query("tell me about subscritpions", "reseller", vocab_correction=False)
     assert "subscritpions" in r.rewritten_query and r.rules_applied == []
+
+
+# ── location-clause stripping (retrieval only; generation keeps the full text) ──
+
+@pytest.mark.parametrize("query,region", [
+    ("which APIs i can use if i am based in vietnam", "vietnam"),
+    ("which APIs can I use if I'm based in Brazil?", "Brazil"),
+    ("which APIs can I use if we are based in Mexico", "Mexico"),
+    ("which APIs can I use if we're located in India", "India"),
+    ("I am based in Vietnam, which APIs can I use?", "Vietnam"),
+])
+def test_a_based_in_region_clause_is_stripped_for_retrieval_only(query, region):
+    r = qr.rewrite_query(query, "reseller")
+    assert region not in r.rewritten_query        # the region word is gone from the SEARCH text...
+    assert region in r.generation_query            # ...but the LLM still sees the full request
+    assert "location_clause_stripped_for_retrieval" in r.rules_applied
+
+
+def test_the_stripped_region_still_reaches_generation_verbatim():
+    r = qr.rewrite_query("which APIs can I use if I am based in Vietnam", "reseller")
+    assert "Vietnam" not in r.rewritten_query and "Vietnam" in r.generation_query
+
+
+@pytest.mark.parametrize("query", [
+    "which APIs can I use in Mexico",              # no "based"/"located" -- not the pattern that collapsed the score
+    "what regions does Autodesk operate in",         # "region" as a topic word, not a location clause
+    "how do I authenticate to the API",              # no location mention at all
+])
+def test_unrelated_phrasing_is_left_alone(query):
+    r = qr.rewrite_query(query, "reseller")
+    assert "location_clause_stripped_for_retrieval" not in r.rules_applied
+
+
+def test_an_unknown_country_is_not_touched():
+    # only vocabulary-listed regions trigger the strip -- an unrecognised place name
+    # is not something this rule can safely judge as "a location clause", so it's left alone.
+    r = qr.rewrite_query("which APIs can I use if I am based in Atlantis", "reseller")
+    assert "location_clause_stripped_for_retrieval" not in r.rules_applied
+    assert r.rewritten_query == r.generation_query
+
+
+def test_both_a_code_request_and_a_location_clause_strip_together():
+    query = "give me sample code in Java to call GetOrderStatus if I am based in Vietnam"
+    r = qr.rewrite_query(query, "reseller")
+    assert set(r.rules_applied) == {"code_request_stripped_for_retrieval", "location_clause_stripped_for_retrieval"}
+    assert r.rewritten_query == "to call GetOrderStatus"
+    assert r.generation_query == query
+
+
+def test_stripping_both_clauses_to_nothing_falls_back_to_the_original():
+    # once BOTH clauses are removed there is no topic left at all -- searching on an
+    # empty string would be worse than searching on the untouched original, so this
+    # falls back rather than sending nothing to retrieval.
+    query = "give me sample code in Java if I am based in Vietnam"
+    r = qr.rewrite_query(query, "reseller")
+    assert r.rewritten_query == query and r.rules_applied == []
