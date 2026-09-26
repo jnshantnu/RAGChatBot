@@ -48,3 +48,12 @@ QUERY_VOCABULARY_PATH = os.environ.get(
 QUERY_LLM_CLASSIFIER_ENABLED = os.environ.get("QUERY_LLM_CLASSIFIER_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
 QUERY_LLM_CLASSIFIER_MODEL = os.environ.get("QUERY_LLM_CLASSIFIER_MODEL", "openai/gpt-4o-mini")
 QUERY_LLM_CLASSIFIER_TIMEOUT_S = float(os.environ.get("QUERY_LLM_CLASSIFIER_TIMEOUT_S", "3"))
+
+# Optional LLM fallback for the RETRIEVAL query (retrieval/query_understanding/
+# llm_rewrite.py): only invoked when the deterministic rewriter's own output
+# already failed the confidence gate -- one retry, never a loop, never on the
+# majority of requests that already succeed. Off by default; any failure or
+# timeout keeps the original abstain, so it can never block a request.
+QUERY_LLM_REWRITE_ENABLED = os.environ.get("QUERY_LLM_REWRITE_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
+QUERY_LLM_REWRITE_MODEL = os.environ.get("QUERY_LLM_REWRITE_MODEL", "openai/gpt-4o-mini")
+QUERY_LLM_REWRITE_TIMEOUT_S = float(os.environ.get("QUERY_LLM_REWRITE_TIMEOUT_S", "3"))

@@ -13,7 +13,8 @@ from dataclasses import dataclass, field
 # position nodes). One shared list so the two can never drift apart.
 PIPELINE_STEP_ORDER = [
     "Query Rewrite", "Embed Query", "Keyword Search", "Semantic Search", "RRF Fusion",
-    "Rerank (competitive)", "Guaranteed Fetch", "Rerank (guaranteed)", "Confidence Gate", "Generate Answer",
+    "Rerank (competitive)", "Guaranteed Fetch", "Rerank (guaranteed)", "Confidence Gate",
+    "LLM Query Rewrite Retry", "Generate Answer",
 ]
 
 

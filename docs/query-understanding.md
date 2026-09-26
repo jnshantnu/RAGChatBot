@@ -223,9 +223,10 @@ One JSON line per request in `logs/requests.jsonl`. New fields: `request_id`
 `ambiguity`, `clarification`, `normalization_count`, `corrected_terms_count`,
 `understanding_fallback`, `classifier` (`rules`/`llm`/`none`),
 `llm_classifier_called`, `llm_classifier_fallback` (called, but the rules'
-result was kept), `retrieval_query_count`, `retrieval_result_count`,
+result was kept), `llm_rewrite_attempted`, `llm_rewrite_used` (the retry
+cleared the confidence gate), `retrieval_query_count`, `retrieval_result_count`,
 `retrieval_fallback_used`, and in `timings_ms`: `normalization_ms`,
-`classification_ms`, `llm_classification_ms` (only when the LLM ran), `understand_ms`, plus the existing retrieve/rerank/generate/
+`classification_ms`, `llm_classification_ms`, `llm_rewrite_ms` (each only when that step ran), `understand_ms`, plus the existing retrieve/rerank/generate/
 total timings. These are counts and categories only; the log already recorded
 `query` before this stage existed and nothing else adds user text. The debug
 view's "Query Rewrite" step shows the full result.
@@ -261,6 +262,46 @@ the spec's trade-in / eligibility examples (fictional entities -- tests use
 fixture vocabularies for those), plus real-corpus questions: `authenication`
 typos, "which APIs can I use", `Get Account` / `Get Subscriptions V1`
 consumption, webhook publication, Buy-Sell vs NxM, troubleshooting phrasing.
+
+## Optional LLM rewrite retry (the "middle path")
+
+Off by default (`QUERY_LLM_REWRITE_ENABLED=true` + restart to enable). This is
+the middle ground between the deterministic rewriter (only fixes what's
+explicitly in its vocabulary) and always calling an LLM to rewrite every
+question (adds latency/cost/non-determinism to every request, including the
+majority that already succeed):
+
+**When it runs:** only after the deterministic pipeline's OWN retrieval already
+failed the confidence gate, and only when the question isn't the ambiguous
+"implement, direction unclear" case (that gets the clarifying question
+instead -- a different search wouldn't resolve it). One call, one retry, never
+a loop. If it fails, times out, or comes back invalid, the original abstain is
+kept untouched -- exactly like every other fallback in this app.
+
+**What it does:** `retrieval/query_understanding/llm_rewrite.py` asks a small
+model to clean up the SEARCH text only -- fix typos, drop clauses about the
+asker's own circumstances -- never to answer the question. Its output is
+validated (non-empty, not wildly longer than the input) before a second
+retrieval attempt is made with it. The original question stays authoritative
+for generation, exactly like every other rewrite in this app; nothing from
+this module ever reaches the answer prompt.
+
+**Measured, not assumed** (`gpt-4o-mini`, real retrieval, real model calls):
+
+| case | outcome |
+|---|---|
+| `which apis can a distributor use if they just joined this month` | **fixed**: the LLM correctly dropped the irrelevant personal clause (something no fixed vocabulary list could ever anticipate); score 0.20 (abstain) -> 0.99 |
+| `which aisp can a distributor use in philipines` | **not fixed**: 0/9 across three prompt variants (including one that explicitly explained letter-jumbling), the model never unscrambled "aisp" -> "apis". A severely scrambled short word turned out to be a genuinely hard task for a small model in one shot -- the deterministic swap-based tier (see "Typo policy") is more reliable for exactly this case, within its own 1-swap safety limit |
+| `how do i hook my order system up to your order feed` (a paraphrase, not a typo) | **not fixed**: the model judged it couldn't improve the wording and returned it unchanged |
+
+**Honest takeaway:** this closes a real, different gap than the deterministic
+rewriter -- arbitrary personal/circumstantial clauses that no curated
+vocabulary could ever list in advance -- but it is not a general typo fixer
+and should not be relied on as one; severely scrambled short words and
+paraphrase/vocabulary mismatches are still real gaps. Shipped OFF, behind its
+own flag, so this can be judged against real production abstains before
+anyone turns it on -- the same standard applied to the LLM classifier
+fallback and to multi-query retrieval below.
 
 ## Tried and rejected: multi-query retrieval
 

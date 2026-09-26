@@ -41,6 +41,7 @@ from llm.generate import GeneratedAnswer, finalize_answer, generate_answer, stre
 from retrieval.pipeline import RetrievalResult, retrieve
 from retrieval.query_rewrite import RewriteResult, get_domain_vocab, rewrite_query
 from retrieval.query_understanding import QueryUnderstandingResult, role_phrase_suffix, understand_query
+from retrieval.query_understanding import llm_rewrite
 from retrieval.trace import TraceStep
 
 # Keyword-triggered intent check for principal-only categories. A real system
@@ -84,6 +85,8 @@ class ChatResponse:
     clarification: bool = False  # True when `answer` is a clarifying question rather than an answer or an abstain
     understanding: dict | None = None  # QueryUnderstandingResult.to_dict() -- what the query-understanding stage decided
     retrieval_result_count: int = 0  # candidates that survived rerank (for logging; the UI shows `scores`)
+    llm_rewrite_attempted: bool = False  # the optional LLM rewrite retry (QUERY_LLM_REWRITE_ENABLED) was tried after an abstain
+    llm_rewrite_used: bool = False       # ...and it produced a retry that cleared the confidence gate
 
 
 def _user_groups(role: str, partner: str) -> list[str]:
@@ -171,6 +174,8 @@ class PendingAnswer:
     t_start: float
     history: list[dict] = field(default_factory=list)
     understanding: QueryUnderstandingResult | None = None
+    llm_rewrite_attempted: bool = False
+    llm_rewrite_used: bool = False
     text: str = ""
     generate_ms: float | None = None
     first_token_ms: float | None = None  # since the request started, not since generation started
@@ -222,6 +227,7 @@ class PendingAnswer:
             mode=self.mode,
             understanding=self.understanding.to_dict() if self.understanding else None,
             retrieval_result_count=len(result.candidates),
+            llm_rewrite_attempted=self.llm_rewrite_attempted, llm_rewrite_used=self.llm_rewrite_used,
             timings_ms={**result.timings_ms, "total_ms": round((time.perf_counter() - self.t_start) * 1000, 1)},
         )
 
@@ -320,6 +326,52 @@ def prepare_answer(
     result.timings_ms["understand_ms"] = understand_ms
     result.timings_ms.update(understand_timings)  # normalization_ms / classification_ms, for the request log
 
+    # Optional LLM rewrite retry (flag-guarded, off by default) -- the "middle
+    # path" between the fast deterministic rewriter and always invoking an
+    # LLM: only tried when the deterministic pipeline's OWN retrieval already
+    # abstained, and skipped entirely for the ambiguous/clarify case below
+    # (a wrong-direction question needs a clarifying answer, not a different
+    # search). One retry, never a loop; any failure just keeps the original
+    # abstain untouched, exactly like every other fallback in this app.
+    llm_rewrite_attempted = llm_rewrite_used = False
+    if (
+        result.gate.abstain and config.QUERY_LLM_REWRITE_ENABLED
+        and not (understanding.ambiguity and understanding.clarifying_question)
+    ):
+        llm_rewrite_attempted = True
+        t0 = time.perf_counter()
+        rewritten_text, rewrite_error = None, None
+        try:
+            rewritten_text = llm_rewrite.rewrite_with_llm(retrieval_query_for_search)
+        except Exception as exc:
+            rewrite_error = str(exc)
+        llm_rewrite_ms = round((time.perf_counter() - t0) * 1000, 1)
+
+        retry_result = None
+        if rewritten_text and rewritten_text.lower() != retrieval_query_for_search.lower():
+            with psycopg.connect(config.DATABASE_URL) as conn:
+                retry_result = retrieve(conn, rewritten_text, user_groups, mode=mode)
+
+        llm_rewrite_trace = TraceStep(
+            name="LLM Query Rewrite Retry",
+            inputs={"query": retrieval_query_for_search, "abstain_reason": result.gate.reason, "score_before": round(result.gate.best_score, 4)},
+            outputs={
+                "rewritten_query": rewritten_text, "error": rewrite_error,
+                "score_after": round(retry_result.gate.best_score, 4) if retry_result else None,
+                "used": bool(retry_result and not retry_result.gate.abstain),
+            },
+            timing_ms=llm_rewrite_ms, started_at=t0,
+        )
+        if retry_result is not None and not retry_result.gate.abstain:
+            llm_rewrite_used = True
+            retry_result.timings_ms.update(result.timings_ms)
+            retry_result.timings_ms["llm_rewrite_ms"] = llm_rewrite_ms
+            retry_result.trace = [*result.trace, llm_rewrite_trace, *retry_result.trace]
+            result = retry_result
+        else:
+            result.timings_ms["llm_rewrite_ms"] = llm_rewrite_ms
+            result.trace = [*result.trace, llm_rewrite_trace]
+
     def early_response(answer: str, **flags) -> ChatResponse:
         return ChatResponse(
             query=query, role=role, partner=partner, answer=answer,
@@ -332,6 +384,7 @@ def prepare_answer(
             timings_ms={**result.timings_ms, "total_ms": round((time.perf_counter() - t_start) * 1000, 1)},
             understanding=understanding.to_dict(),
             retrieval_result_count=len(result.candidates),
+            llm_rewrite_attempted=llm_rewrite_attempted, llm_rewrite_used=llm_rewrite_used,
             **flags,
         )
 
@@ -355,6 +408,7 @@ def prepare_answer(
         query=query, role=role, partner=partner, mode=mode,
         retrieval_query=retrieval_query, generation_query=generation_query, rewrite=rewrite, rewrite_trace=rewrite_trace,
         result=result, t_start=t_start, history=history or [], understanding=understanding,
+        llm_rewrite_attempted=llm_rewrite_attempted, llm_rewrite_used=llm_rewrite_used,
     )
 
 

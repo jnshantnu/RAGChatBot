@@ -92,3 +92,17 @@ def test_log_shows_rules_only_requests_did_not_call_the_llm(log_path):
     server._log_request(req, make_response(), 1.0, "id")
     line = json.loads(log_path.read_text())
     assert (line["classifier"], line["llm_classifier_called"], line["llm_classifier_fallback"]) == ("rules", False, False)
+
+
+def test_log_records_the_llm_rewrite_retry_flags(log_path):
+    req = server.ChatRequest(query="which apis can a distributor use in philipines", role="distributor", partner="acme")
+    server._log_request(req, make_response(llm_rewrite_attempted=True, llm_rewrite_used=True), 1.0, "id")
+    line = json.loads(log_path.read_text())
+    assert line["llm_rewrite_attempted"] is True and line["llm_rewrite_used"] is True
+
+
+def test_log_defaults_the_llm_rewrite_flags_to_false(log_path):
+    req = server.ChatRequest(query="q", role="reseller", partner="acme")
+    server._log_request(req, make_response(), 1.0, "id")
+    line = json.loads(log_path.read_text())
+    assert line["llm_rewrite_attempted"] is False and line["llm_rewrite_used"] is False

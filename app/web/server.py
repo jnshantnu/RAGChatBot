@@ -86,7 +86,9 @@ def _log_request(req: ChatRequest, result: ChatResponse, wall_ms: float, request
         "retrieval_query_count": 1,  # always one search query (multi-query retrieval was tried and removed; see docs/query-understanding.md)
         "retrieval_result_count": result.retrieval_result_count,
         "retrieval_fallback_used": False,  # always False; kept so the log schema stays stable
-        "timings_ms": result.timings_ms,  # includes normalization_ms, classification_ms, llm_classification_ms (only when the LLM classifier ran), understand_ms, retrieve/rerank, generate, total
+        "llm_rewrite_attempted": result.llm_rewrite_attempted,  # the optional retry-on-abstain rewrite (QUERY_LLM_REWRITE_ENABLED) was tried
+        "llm_rewrite_used": result.llm_rewrite_used,            # ...and its retry cleared the confidence gate
+        "timings_ms": result.timings_ms,  # includes normalization_ms, classification_ms, llm_classification_ms, llm_rewrite_ms (each only when that step ran), understand_ms, retrieve/rerank, generate, total
         "total_wall_ms": wall_ms,
     }
     os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
