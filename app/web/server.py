@@ -18,7 +18,7 @@ import os
 import time
 import uuid
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -27,7 +27,18 @@ from chat import ChatResponse, prepare_answer
 from retrieval.query_understanding import FALLBACK_WARNING
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
-LOG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "logs", "requests.jsonl")
+LOGS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "logs")
+LOG_PATH = os.path.join(LOGS_DIR, "requests.jsonl")
+# Real-usage signal (docs/eval-and-feedback.md): a 👍/👎 (+ optional comment) on
+# any past answer, keyed by that answer's request_id -- the same id already in
+# requests.jsonl, so eval/triage_feedback.py can join the two on read without
+# either file needing to know about the other's schema. A separate file, not a
+# rewrite of the request's own log line, because a rating can arrive well after
+# that line was written (the user reads the answer, then decides) and multiple
+# ratings/comments for the same request_id are all kept, not overwritten --
+# more signal, never destructive.
+FEEDBACK_LOG_PATH = os.path.join(LOGS_DIR, "feedback.jsonl")
+MAX_FEEDBACK_COMMENT_CHARS = 500
 
 # Single pipeline, same choice app/streamlit_app.py made after Compare mode's
 # headline turned out to swing on embedding-call network noise rather than
@@ -42,6 +53,12 @@ app = FastAPI()
 class HistoryTurn(BaseModel):
     query: str
     answer: str
+
+
+class FeedbackRequest(BaseModel):
+    request_id: str
+    rating: str  # "up" | "down"
+    comment: str | None = None
 
 
 class ChatRequest(BaseModel):
@@ -119,7 +136,7 @@ def _stream_chat(req: ChatRequest):
     if isinstance(prepared, ChatResponse):
         # Permission refusal or confidence-gate abstain -- nothing to stream.
         _log_request(req, prepared, round((time.perf_counter() - t0) * 1000, 1), request_id)
-        yield _sse("final", dataclasses.asdict(prepared))
+        yield _sse("final", {**dataclasses.asdict(prepared), "request_id": request_id})
         return
 
     retrieve_s = time.perf_counter() - t0
@@ -130,12 +147,30 @@ def _stream_chat(req: ChatRequest):
 
     result = prepared.finish()
     _log_request(req, result, result.timings_ms["total_ms"], request_id)
-    yield _sse("final", dataclasses.asdict(result))
+    yield _sse("final", {**dataclasses.asdict(result), "request_id": request_id})
 
 
 @app.post("/api/chat")
 def chat(req: ChatRequest):
     return StreamingResponse(_stream_chat(req), media_type="text/event-stream")
+
+
+@app.post("/api/feedback")
+def feedback(req: FeedbackRequest):
+    # request_id is generated server-side per request (see _stream_chat) and
+    # is exactly a uuid4 hex slice -- reject anything else rather than write
+    # arbitrary client-supplied text into the log's join key.
+    if req.rating not in ("up", "down"):
+        raise HTTPException(422, "rating must be 'up' or 'down'")
+    # request_id is always uuid.uuid4().hex[:12] (see _stream_chat) -- exact length, lowercase hex only.
+    if len(req.request_id) != 12 or not all(c in "0123456789abcdef" for c in req.request_id):
+        raise HTTPException(422, "invalid request_id")
+    comment = (req.comment or "").strip()[:MAX_FEEDBACK_COMMENT_CHARS] or None
+    line = {"request_id": req.request_id, "rating": req.rating, "comment": comment, "ts": time.time()}
+    os.makedirs(LOGS_DIR, exist_ok=True)
+    with open(FEEDBACK_LOG_PATH, "a") as fh:
+        fh.write(json.dumps(line) + "\n")
+    return {"ok": True}
 
 
 # Static files (index.html, style.css, app.js) mounted last -- FastAPI/

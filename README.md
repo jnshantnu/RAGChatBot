@@ -52,6 +52,8 @@ python -m retrieval.cli_test "Does the platform support Slack notifications?"   
 python -m eval.run_eval
 pytest
 python -m eval.run_understanding_eval    # query-understanding accuracy; add --retrieval for the retrieval comparison, --llm for the LLM-fallback check
+python -m eval.run_generation_eval       # is the actual ANSWER text correct, not just retrieval -- see docs/eval-and-feedback.md
+python -m eval.triage_feedback           # review real 👍/👎 feedback from the chat UI, joined with its request context
 
 # 4. Start the web UI
 uvicorn app.main:app --reload

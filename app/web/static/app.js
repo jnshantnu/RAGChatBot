@@ -32,6 +32,13 @@ const sidebarToggle = document.getElementById("sidebarToggle");
 
 const history = []; // finished turns: {query, role, partner, response}
 
+// Feedback already sent this page load, keyed by request_id -- survives
+// renderHistory()'s full re-render (it rebuilds every turn's DOM from
+// scratch each time) so a rating stays visibly selected instead of
+// resetting the moment a new turn is added. Session-only by design, same
+// as `history` above: a reload starts a fresh conversation either way.
+const feedbackGiven = new Map(); // request_id -> "up" | "down"
+
 debugToggle.addEventListener("change", renderHistory);
 
 // Narrow-screen sidebar: an off-canvas overlay toggled by the hamburger
@@ -329,6 +336,8 @@ function renderStaticTurn(turn) {
     card.appendChild(cap);
   }
 
+  if (r.request_id) card.appendChild(buildFeedbackRow(r.request_id));
+
   if (r.rewritten_query) {
     card.appendChild(buildExpander(
       `Rewritten query (${(r.rewrite_rules_applied || []).join(", ")})`,
@@ -386,6 +395,92 @@ function renderStaticTurn(turn) {
   }
 
   logEl.appendChild(assistantTurn);
+}
+
+// One 👍/👎 + an optional-comment box for a 👎, POSTed to /api/feedback and
+// correlated server-side by request_id with that answer's own line in
+// requests.jsonl (see server.py's FEEDBACK_LOG_PATH comment) -- the only
+// source of signal in this app about whether a REAL answer was actually
+// good, as opposed to the eval sets' fixed, hand-picked questions.
+async function sendFeedback(requestId, rating, comment) {
+  try {
+    await fetch("api/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ request_id: requestId, rating, comment: comment || null }),
+    });
+  } catch (err) {
+    // Best-effort: a failed feedback POST must never disrupt the chat itself.
+  }
+}
+
+function buildFeedbackRow(requestId) {
+  const row = document.createElement("div");
+  row.className = "feedback-row";
+
+  const label = document.createElement("span");
+  label.className = "feedback-label";
+  label.textContent = "Was this helpful?";
+  row.appendChild(label);
+
+  const upBtn = document.createElement("button");
+  upBtn.type = "button";
+  upBtn.className = "feedback-btn";
+  upBtn.textContent = "👍";
+  const downBtn = document.createElement("button");
+  downBtn.type = "button";
+  downBtn.className = "feedback-btn";
+  downBtn.textContent = "👎";
+
+  const commentBox = document.createElement("div");
+  commentBox.className = "feedback-comment";
+  commentBox.hidden = true;
+  const commentInput = document.createElement("input");
+  commentInput.type = "text";
+  commentInput.placeholder = "what was wrong? (optional)";
+  commentInput.maxLength = 500;
+  const sendBtn = document.createElement("button");
+  sendBtn.type = "button";
+  sendBtn.textContent = "Send";
+  commentBox.appendChild(commentInput);
+  commentBox.appendChild(sendBtn);
+
+  function applySelected() {
+    const rating = feedbackGiven.get(requestId);
+    upBtn.classList.toggle("selected", rating === "up");
+    downBtn.classList.toggle("selected", rating === "down");
+  }
+  applySelected();
+
+  upBtn.addEventListener("click", () => {
+    feedbackGiven.set(requestId, "up");
+    applySelected();
+    commentBox.hidden = true;
+    sendFeedback(requestId, "up");
+  });
+  downBtn.addEventListener("click", () => {
+    feedbackGiven.set(requestId, "down");
+    applySelected();
+    commentBox.hidden = false;
+    commentInput.focus();
+    sendFeedback(requestId, "down");
+  });
+  const sendComment = () => {
+    const text = commentInput.value.trim();
+    if (!text) return;
+    sendFeedback(requestId, "down", text);
+    commentInput.value = "";
+    commentBox.hidden = true;
+  };
+  sendBtn.addEventListener("click", sendComment);
+  commentInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") sendComment();
+  });
+
+  row.appendChild(upBtn);
+  row.appendChild(downBtn);
+  row.appendChild(commentBox);
+  return row;
 }
 
 function buildExpander(title, fillBody) {

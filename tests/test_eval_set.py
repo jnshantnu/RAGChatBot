@@ -36,3 +36,18 @@ def test_llm_classifier_eval_rows_all_fall_through_the_rules(shipped_vocab):
     for case in json.load(open(path, encoding="utf-8")):
         r = understand_query(case["query"], "reseller", vocab=shipped_vocab, enabled=True, llm_enabled=False)
         assert r.intent.value == "unknown", case["query"]
+
+
+def test_generation_eval_set_cases_are_well_formed():
+    """eval/generation_eval_set.json cases are checked by run_generation_eval.py
+    (needs live infra, so not run under pytest) -- this only guards the shape."""
+    import os
+    path = os.path.join(os.path.dirname(__file__), "..", "eval", "generation_eval_set.json")
+    cases = json.load(open(path, encoding="utf-8"))
+    assert len(cases) >= 5
+    for case in cases:
+        assert case["query"] and case.get("role") in ("reseller", "distributor", "solution_provider", "principal", None)
+        if case.get("must_abstain"):
+            assert not case.get("expected_facts") and not case.get("forbidden_facts")
+        else:
+            assert case.get("expected_facts"), f"{case['query']!r} has no expected_facts and isn't must_abstain"

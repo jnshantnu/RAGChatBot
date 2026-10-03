@@ -207,6 +207,26 @@ h1 { font-size: 26px; font-weight: 600; letter-spacing: 0.3px; }
 
 .meta-caption { font-size: 12px; color: var(--text-muted); margin-top: 8px; }
 
+.feedback-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.feedback-label { font-size: 12px; color: var(--text-muted); }
+.feedback-btn {
+  border: 1px solid var(--border); background: var(--bg-control); border-radius: var(--radius-sm);
+  padding: 3px 9px; font-size: 13px; cursor: pointer; transition: var(--transition); line-height: 1.4;
+}
+.feedback-btn:hover { border-color: var(--border-focus); }
+.feedback-btn.selected { border-color: var(--cyan); background: var(--cyan-glow); }
+.feedback-comment { display: flex; gap: 6px; width: 100%; margin-top: 2px; }
+.feedback-comment input {
+  flex: 1; min-width: 0; padding: 6px 9px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+  background: var(--bg-control); color: var(--text); font-family: inherit; font-size: 12.5px;
+}
+.feedback-comment input:focus { outline: none; border-color: var(--border-focus); }
+.feedback-comment button {
+  border: 1px solid var(--border); background: var(--bg-control); border-radius: var(--radius-sm);
+  padding: 6px 12px; font-size: 12.5px; cursor: pointer; color: var(--text); transition: var(--transition);
+}
+.feedback-comment button:hover { border-color: var(--border-focus); }
+
 details.expander {
   margin-top: 10px; border: 1px solid var(--border); border-radius: var(--radius-sm);
   background: var(--bg-control); overflow: hidden;

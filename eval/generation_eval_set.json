@@ -1,0 +1,230 @@
+[
+  {
+    "query": "how do I authenticate to the Partner WebServices API?",
+    "role": "reseller",
+    "partner": "acme",
+    "min_citations": 1,
+    "expected_facts": [
+      "Partner Developer Portal",
+      "Authorization"
+    ]
+  },
+  {
+    "query": "what is the difference between Buy-Sell and NxM?",
+    "role": "reseller",
+    "partner": "acme",
+    "min_citations": 1,
+    "expected_facts": [
+      "Solution Provider",
+      "Reseller",
+      "Distributor"
+    ]
+  },
+  {
+    "query": "what is the maximum number of line items allowed in a CreateQuote request?",
+    "role": "reseller",
+    "partner": "acme",
+    "min_citations": 1,
+    "expected_facts": [
+      "250"
+    ]
+  },
+  {
+    "query": "which apis can a distributor use in the philippines",
+    "role": "distributor",
+    "partner": "acme",
+    "min_citations": 1,
+    "expected_facts": [
+      "Buy Sell",
+      "Get My Price",
+      "Place Order"
+    ],
+    "forbidden_facts": [
+      "NBE",
+      "Agency"
+    ]
+  },
+  {
+    "query": "give me sample python code to call the GetOrderStatus service and print the status of an order",
+    "role": "distributor",
+    "partner": "acme",
+    "min_citations": 1,
+    "expected_facts": [
+      "GET",
+      "/v1/orders/status",
+      "Authorization"
+    ]
+  },
+  {
+    "query": "give me sample python code to call the GetOrderStatus service and print the status of an order",
+    "role": "reseller",
+    "partner": "acme",
+    "min_citations": 1,
+    "expected_facts": [
+      "Distributor",
+      "Order"
+    ],
+    "forbidden_facts": [
+      "```python",
+      "def get_order_status"
+    ]
+  },
+  {
+    "query": "what does error API-4012 mean?",
+    "role": "reseller",
+    "partner": "acme",
+    "must_abstain": true
+  },
+  {
+    "query": "does the platform support carrier pigeons for order delivery",
+    "role": "reseller",
+    "partner": "acme",
+    "must_abstain": true
+  },
+  {
+    "query": "am I eligible for the NxM program?",
+    "role": "distributor",
+    "partner": "acme",
+    "must_abstain": true
+  },
+  {
+    "query": "What does the GetInvoice service return?",
+    "role": "distributor",
+    "partner": "acme",
+    "min_citations": 1,
+    "expected_facts": [
+      "invoice",
+      "date range"
+    ]
+  },
+  {
+    "query": "What does the GetMyPrice API do?",
+    "role": "distributor",
+    "partner": "acme",
+    "min_citations": 1,
+    "expected_facts": [
+      "purchase price"
+    ]
+  },
+  {
+    "query": "How does GetOrderDetails behave differently for a Reseller versus a Distributor?",
+    "role": "reseller",
+    "partner": "acme",
+    "min_citations": 1,
+    "expected_facts": [
+      "price",
+      "blank"
+    ]
+  },
+  {
+    "query": "What is the workflow for placing an order with the Place Order API?",
+    "role": "distributor",
+    "partner": "acme",
+    "min_citations": 1,
+    "expected_facts": [
+      "GetMyPrice",
+      "price"
+    ]
+  },
+  {
+    "query": "What does the UpdateSubscriptions API allow a partner to do?",
+    "role": "distributor",
+    "partner": "acme",
+    "min_citations": 1,
+    "expected_facts": [
+      "batch of subscriptions",
+      "same contract"
+    ]
+  },
+  {
+    "query": "What does the GetQuoteDetails v3 API return?",
+    "role": "solution_provider",
+    "partner": "acme",
+    "min_citations": 1,
+    "expected_facts": [
+      "quoteNumber",
+      "opportunityNumber"
+    ]
+  },
+  {
+    "query": "What does the FinalizeQuote API do?",
+    "role": "solution_provider",
+    "partner": "acme",
+    "min_citations": 1,
+    "expected_facts": [
+      "Agent",
+      "CPQ"
+    ]
+  },
+  {
+    "query": "What does the GetAccounts API return?",
+    "role": "distributor",
+    "partner": "acme",
+    "min_citations": 1,
+    "expected_facts": [
+      "accountByCsn",
+      "buyingReadinessScore"
+    ]
+  },
+  {
+    "query": "What does the GetOpportunity v2 API return?",
+    "role": "solution_provider",
+    "partner": "acme",
+    "min_citations": 1,
+    "expected_facts": [
+      "opportunityNumber",
+      "CSN"
+    ]
+  },
+  {
+    "query": "What does the GetQuoteStatus API return?",
+    "role": "solution_provider",
+    "partner": "acme",
+    "min_citations": 1,
+    "expected_facts": [
+      "quoteStatus",
+      "RECEIVED"
+    ]
+  },
+  {
+    "query": "What does the GetSubscriptionsStatus API return?",
+    "role": "distributor",
+    "partner": "acme",
+    "min_citations": 1,
+    "expected_facts": [
+      "120 days",
+      "subscriptionId"
+    ]
+  },
+  {
+    "query": "What does the GetSubscriptions v2 API return?",
+    "role": "solution_provider",
+    "partner": "acme",
+    "min_citations": 1,
+    "expected_facts": [
+      "results",
+      "bulk"
+    ]
+  },
+  {
+    "query": "What are the benefits of the NxM model for partners?",
+    "role": "solution_provider",
+    "partner": "acme",
+    "min_citations": 1,
+    "expected_facts": [
+      "commission",
+      "backend processing"
+    ]
+  },
+  {
+    "query": "What are the correlation inputs needed to build a Sales and Customer Success dashboard?",
+    "role": "distributor",
+    "partner": "acme",
+    "min_citations": 1,
+    "expected_facts": [
+      "Opportunity number",
+      "Customer CSN",
+      "Subscription ID"
+    ]
+  }
+]
